@@ -26,15 +26,16 @@ Manage Discord roles via invite links with web admin. Two modes: **AUTO** (insta
 1. Click Deploy on Railway
 2. Add PostgreSQL database
 3. Set environment variables (see `.env.example`)
-4. Run in your terminal(with .env file):
-   ```bash
-   python manage.py migrate
-   python manage.py init_defaults
-   ```
-5. Invite bot to your Discord server
-6. Give yourself `@BotAdmin` role
-7. DM bot: `@BotName getaccess`
-8. Configure via web panel
+4. Wait for the web service to deploy successfully
+5. **Create a second service for the bot:**
+   - In Railway dashboard, create a new service from your repo
+   - Give it a name (e.g., "discord-bot")
+   - In the service settings, add a custom start command: `python bot/main.py`
+   - Deploy
+6. Invite bot to your Discord server
+7. Give yourself `@BotAdmin` role
+8. DM bot: `@BotName getaccess`
+9. Configure via web panel
 
 ### Self-Host
 
