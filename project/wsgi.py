@@ -85,3 +85,8 @@ application = DatabaseResetMiddleware(application)
 print("[WSGI] WSGI application loaded successfully", flush=True)
 sys.stdout.flush()
 sys.stderr.flush()
+
+# Signal that we're ready to receive requests
+print("[WSGI] *** WORKER READY TO HANDLE REQUESTS ***", flush=True)
+sys.stdout.flush()
+sys.stderr.flush()

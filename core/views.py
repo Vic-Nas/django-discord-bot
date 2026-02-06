@@ -67,4 +67,6 @@ def home(request):
     import sys
     print("[HOME] Home view called", flush=True)
     sys.stdout.flush()
-    return render(request, 'home.html')
+    sys.stderr.flush()
+    return HttpResponse('<html><body>Django bot web panel - OK</body></html>', content_type='text/html')
+
