@@ -2,6 +2,7 @@ import discord
 from core.models import GuildSettings, InviteRule, Application
 from .templates import get_template
 from .guild_setup import ensure_required_resources
+from asgiref.sync import sync_to_async
 
 
 async def handle_member_join(bot, member, invite_cache):
@@ -14,7 +15,7 @@ async def handle_member_join(bot, member, invite_cache):
     
     # Get guild settings
     try:
-        guild_settings = GuildSettings.objects.get(guild_id=guild.id)
+        guild_settings = await sync_to_async(GuildSettings.objects.get)(guild_id=guild.id)
     except GuildSettings.DoesNotExist:
         print(f'⚠️ No settings for guild {guild.name}, skipping')
         return

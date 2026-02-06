@@ -1,5 +1,6 @@
 import discord
 from core.models import GuildSettings, DiscordRole, DiscordChannel
+from asgiref.sync import sync_to_async
 
 
 async def sync_guild_data(bot, guild_id):
@@ -11,7 +12,7 @@ async def sync_guild_data(bot, guild_id):
     """
     
     try:
-        guild_settings = GuildSettings.objects.get(guild_id=guild_id)
+        guild_settings = await sync_to_async(GuildSettings.objects.get)(guild_id=guild_id)
     except GuildSettings.DoesNotExist:
         return "❌ Guild not found in database"
     
@@ -21,14 +22,14 @@ async def sync_guild_data(bot, guild_id):
     
     # Update guild name
     guild_settings.guild_name = guild.name
-    guild_settings.save()
+    await sync_to_async(guild_settings.save)()
     
     # Sync roles
     roles_synced = 0
     roles_marked_deleted = 0
     
     discord_role_ids = {role.id for role in guild.roles}
-    db_roles = DiscordRole.objects.filter(guild=guild_settings)
+    db_roles = await sync_to_async(lambda: list(DiscordRole.objects.filter(guild=guild_settings)))()
     
     for db_role in db_roles:
         if db_role.discord_id in discord_role_ids:
@@ -37,13 +38,13 @@ async def sync_guild_data(bot, guild_id):
             if discord_role:
                 db_role.name = discord_role.name
                 db_role.is_deleted = False
-                db_role.save()
+                await sync_to_async(db_role.save)()
                 roles_synced += 1
         else:
             # Mark as deleted
             if not db_role.is_deleted:
                 db_role.is_deleted = True
-                db_role.save()
+                await sync_to_async(db_role.save)()
                 roles_marked_deleted += 1
     
     # Sync channels
@@ -51,7 +52,7 @@ async def sync_guild_data(bot, guild_id):
     channels_marked_deleted = 0
     
     discord_channel_ids = {channel.id for channel in guild.channels}
-    db_channels = DiscordChannel.objects.filter(guild=guild_settings)
+    db_channels = await sync_to_async(lambda: list(DiscordChannel.objects.filter(guild=guild_settings)))()
     
     for db_channel in db_channels:
         if db_channel.discord_id in discord_channel_ids:
@@ -60,13 +61,13 @@ async def sync_guild_data(bot, guild_id):
             if discord_channel:
                 db_channel.name = discord_channel.name
                 db_channel.is_deleted = False
-                db_channel.save()
+                await sync_to_async(db_channel.save)()
                 channels_synced += 1
         else:
             # Mark as deleted
             if not db_channel.is_deleted:
                 db_channel.is_deleted = True
-                db_channel.save()
+                await sync_to_async(db_channel.save)()
                 channels_marked_deleted += 1
     
     # Build report

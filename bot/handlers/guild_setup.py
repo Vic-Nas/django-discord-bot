@@ -1,6 +1,7 @@
 import discord
 from core.models import GuildSettings, DiscordRole, DiscordChannel
 from .templates import get_template
+from asgiref.sync import sync_to_async
 
 
 async def setup_guild(bot, guild):
@@ -14,7 +15,7 @@ async def setup_guild(bot, guild):
     """
     
     # Get or create guild settings
-    guild_settings, created = GuildSettings.objects.get_or_create(
+    guild_settings, created = await sync_to_async(GuildSettings.objects.get_or_create)(
         guild_id=guild.id,
         defaults={'guild_name': guild.name}
     )
@@ -22,14 +23,14 @@ async def setup_guild(bot, guild):
     if not created:
         # Update guild name in case it changed
         guild_settings.guild_name = guild.name
-        guild_settings.save()
+        await sync_to_async(guild_settings.save)()
     
     # Create BotAdmin role
     bot_admin_role = await get_or_create_role(guild, "BotAdmin", color=discord.Color.blue())
     guild_settings.bot_admin_role_id = bot_admin_role.id
     
     # Cache role in DB
-    DiscordRole.objects.update_or_create(
+    await sync_to_async(DiscordRole.objects.update_or_create)(
         discord_id=bot_admin_role.id,
         guild=guild_settings,
         defaults={'name': bot_admin_role.name, 'is_deleted': False}
@@ -40,7 +41,7 @@ async def setup_guild(bot, guild):
     guild_settings.pending_role_id = pending_role.id
     
     # Cache role in DB
-    DiscordRole.objects.update_or_create(
+    await sync_to_async(DiscordRole.objects.update_or_create)(
         discord_id=pending_role.id,
         guild=guild_settings,
         defaults={'name': pending_role.name, 'is_deleted': False}
@@ -51,13 +52,13 @@ async def setup_guild(bot, guild):
     guild_settings.logs_channel_id = logs_channel.id
     
     # Cache channel in DB
-    DiscordChannel.objects.update_or_create(
+    await sync_to_async(DiscordChannel.objects.update_or_create)(
         discord_id=logs_channel.id,
         guild=guild_settings,
         defaults={'name': logs_channel.name, 'is_deleted': False}
     )
     
-    guild_settings.save()
+    await sync_to_async(guild_settings.save)()
     
     # Send welcome message to logs
     template = get_template(guild_settings, 'INSTALL_WELCOME')
@@ -122,9 +123,9 @@ async def ensure_required_resources(bot, guild_settings):
             # Recreate
             role = await get_or_create_role(guild, "BotAdmin", color=discord.Color.blue())
             guild_settings.bot_admin_role_id = role.id
-            guild_settings.save()
+            await sync_to_async(guild_settings.save)()
             
-            DiscordRole.objects.update_or_create(
+            await sync_to_async(DiscordRole.objects.update_or_create)(
                 discord_id=role.id,
                 guild=guild_settings,
                 defaults={'name': role.name, 'is_deleted': False}
@@ -136,9 +137,9 @@ async def ensure_required_resources(bot, guild_settings):
         if not role:
             role = await get_or_create_role(guild, "Pending", color=discord.Color.orange())
             guild_settings.pending_role_id = role.id
-            guild_settings.save()
+            await sync_to_async(guild_settings.save)()
             
-            DiscordRole.objects.update_or_create(
+            await sync_to_async(DiscordRole.objects.update_or_create)(
                 discord_id=role.id,
                 guild=guild_settings,
                 defaults={'name': role.name, 'is_deleted': False}
@@ -151,9 +152,9 @@ async def ensure_required_resources(bot, guild_settings):
             admin_role = guild.get_role(guild_settings.bot_admin_role_id)
             channel = await get_or_create_channel(guild, "logs", admin_role)
             guild_settings.logs_channel_id = channel.id
-            guild_settings.save()
+            await sync_to_async(guild_settings.save)()
             
-            DiscordChannel.objects.update_or_create(
+            await sync_to_async(DiscordChannel.objects.update_or_create)(
                 discord_id=channel.id,
                 guild=guild_settings,
                 defaults={'name': channel.name, 'is_deleted': False}
@@ -166,9 +167,9 @@ async def ensure_required_resources(bot, guild_settings):
             admin_role = guild.get_role(guild_settings.bot_admin_role_id)
             channel = await get_or_create_channel(guild, "approvals", admin_role)
             guild_settings.approvals_channel_id = channel.id
-            guild_settings.save()
+            await sync_to_async(guild_settings.save)()
             
-            DiscordChannel.objects.update_or_create(
+            await sync_to_async(DiscordChannel.objects.update_or_create)(
                 discord_id=channel.id,
                 guild=guild_settings,
                 defaults={'name': channel.name, 'is_deleted': False}
