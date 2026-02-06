@@ -11,7 +11,7 @@ DEFAULT_TEMPLATES = {
 
 📝 **Next steps:**
 1. Assign {bot_admin} role to your admins
-2. DM me `{bot_mention} getaccess` to access the web panel
+2. DM me `@myusername getaccess` to access the web panel
 3. Configure your server mode (AUTO or APPROVAL)
 
 💡 You can rename these roles/channels - I track them by ID!""",
