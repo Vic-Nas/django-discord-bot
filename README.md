@@ -2,7 +2,7 @@
 
 Manage Discord roles via invite links with web admin. Two modes: **AUTO** (instant role assignment) or **APPROVAL** (application forms with admin review).
 
-## [🔗 Invite Bot](#) | [📖 Documentation](#commands)
+## [🔗 Invite Bot](https://discord.com/oauth2/authorize?client_id=1430005122917990410&permissions=268504080&integration_type=0&scope=bot) | [📖 Documentation](#commands)
 
 ---
 
@@ -21,9 +21,9 @@ Manage Discord roles via invite links with web admin. Two modes: **AUTO** (insta
 
 ### Deploy to Railway
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/your-template)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.com?referralCode=ZIdvo-)
 
-1. Click [Deploy on Railway](https://railway.com?referralCode=ZIdvo-)
+1. Click Deploy on Railway
 2. Add PostgreSQL database
 3. Set environment variables (see `.env.example`)
 4. Run in your terminal(with .env file):
@@ -41,8 +41,8 @@ Manage Discord roles via invite links with web admin. Two modes: **AUTO** (insta
 **Requirements:** Python 3.10+, PostgreSQL, Cloudinary account
 
 ```bash
-git clone https://github.com/yourusername/discord-role-bot.git
-cd discord-role-bot
+git clone https://github.com/Vic-Nas/django-discord-bot
+cd discord-discord-bot
 pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your credentials
@@ -58,7 +58,15 @@ python bot/main.py
 - `SECRET_KEY` - Random string for Django
 - `APP_URL` - Your deployment URL
 
----
+**Bot Permissions Required:**
+
+When creating the OAuth2 invite URL in Discord Developer Portal, grant these permissions:
+- **Manage Roles** - Assign roles to members
+- **Manage Channels** - Create/update logs and approvals channels
+- **Send Messages** - Post in logs and approvals channels
+- **Read Messages/View Channels** - Access channel content
+- **Read Message History** - Log historical messages
+
 
 ## Commands
 
@@ -124,7 +132,6 @@ Get access: DM bot `@BotName getaccess`
 
 ## Support
 
-- 📖 Full docs in `/docs` folder
 - 🐛 Issues: GitHub Issues
 - 💬 Questions: GitHub Discussions
 
