@@ -31,7 +31,8 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'project.debug_middleware.DebugRequestMiddleware',
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
+    # Temporarily disable whitenoise to see if that's causing the hang
+    # 'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -67,8 +68,24 @@ db_url = os.environ.get('DATABASE_URL')
 print(f"[DJANGO_SETTINGS] DATABASE_URL present: {bool(db_url)}", flush=True)
 sys.stdout.flush()
 
+if db_url:
+    print(f"[DJANGO_SETTINGS] DATABASE_URL starts with: {db_url[:20]}...", flush=True)
+    sys.stdout.flush()
+
+print("[DJANGO_SETTINGS] Parsing database URL with dj_database_url", flush=True)
+sys.stdout.flush()
+
+try:
+    parsed_db = dj_database_url.parse(db_url)
+    print("[DJANGO_SETTINGS] Database URL parsed successfully", flush=True)
+    sys.stdout.flush()
+except Exception as e:
+    print(f"[DJANGO_SETTINGS] ERROR parsing database URL: {e}", flush=True)
+    sys.stdout.flush()
+    raise
+
 DATABASES = {
-    'default': dj_database_url.parse(db_url)
+    'default': parsed_db
 }
 
 print(f"[DJANGO_SETTINGS] Database config: {DATABASES['default'].get('ENGINE', 'unknown')}", flush=True)
@@ -98,7 +115,9 @@ USE_TZ = True
 # Static files
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+# Temporarily disable CompressedManifestStaticFilesStorage to see if that's causing hang
+STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
+# STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
