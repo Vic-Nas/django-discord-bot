@@ -1,10 +1,12 @@
 import os
 import sys
+import time
 from pathlib import Path
 from dotenv import load_dotenv
 import dj_database_url
 
-print("[DJANGO_SETTINGS] Starting settings.py load", flush=True)
+start_time = time.time()
+print(f"[DJANGO_SETTINGS] Starting settings.py load at {start_time}", flush=True)
 sys.stdout.flush()
 
 load_dotenv()
@@ -151,6 +153,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 import cloudinary
 
 print("[DJANGO_SETTINGS] Configuring Cloudinary", flush=True)
+cloudinary_start = time.time()
 sys.stdout.flush()
 
 cloudinary.config(
@@ -159,10 +162,13 @@ cloudinary.config(
     api_secret=os.getenv('CLOUDINARY_API_SECRET'),
 )
 
-print("[DJANGO_SETTINGS] Cloudinary configured", flush=True)
+cloudinary_time = time.time() - cloudinary_start
+print(f"[DJANGO_SETTINGS] Cloudinary configured in {cloudinary_time:.2f}s", flush=True)
 sys.stdout.flush()
 
 
 print("[DJANGO_SETTINGS] Settings.py loaded successfully", flush=True)
+settings_total = time.time() - start_time
+print(f"[DJANGO_SETTINGS] Total settings load time: {settings_total:.2f}s", flush=True)
 sys.stdout.flush()
 

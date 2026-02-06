@@ -1,6 +1,7 @@
 import os
 import sys
 import signal
+import time
 from django.core.wsgi import get_wsgi_application
 
 # Install signal handlers FIRST
@@ -13,7 +14,8 @@ def handle_signal(signum, frame):
 signal.signal(signal.SIGTERM, handle_signal)
 signal.signal(signal.SIGINT, handle_signal)
 
-print("[WSGI] Starting WSGI initialization", flush=True)
+wsgi_start = time.time()
+print(f"[WSGI] Starting WSGI initialization at {wsgi_start}", flush=True)
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'project.settings')
 
@@ -35,10 +37,12 @@ def timeout_handler(signum, frame):
 signal.signal(signal.SIGALRM, timeout_handler)
 signal.alarm(30)  # 30 second timeout
 
+get_wsgi_start = time.time()
 try:
     application = get_wsgi_application()
     signal.alarm(0)  # Cancel alarm
-    print("[WSGI] get_wsgi_application() returned successfully", flush=True)
+    get_wsgi_time = time.time() - get_wsgi_start
+    print(f"[WSGI] get_wsgi_application() took {get_wsgi_time:.2f}s", flush=True)
     sys.stdout.flush()
     sys.stderr.flush()
 except Exception as e:
@@ -72,11 +76,8 @@ class SimpleLogMiddleware:
 # Wrap the application
 application = SimpleLogMiddleware(application)
 
-print("[WSGI] WSGI application loaded successfully", flush=True)
-sys.stdout.flush()
-sys.stderr.flush()
-
-# Signal that we're ready to receive requests
+wsgi_time = time.time() - wsgi_start
+print(f"[WSGI] WSGI application loaded successfully in {wsgi_time:.2f}s total", flush=True)
 print("[WSGI] *** WORKER READY TO HANDLE REQUESTS ***", flush=True)
 sys.stdout.flush()
 sys.stderr.flush()
