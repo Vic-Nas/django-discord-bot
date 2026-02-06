@@ -31,7 +31,15 @@ if app_url:
         allowed_hosts.append(app_url)
 
 ALLOWED_HOSTS = list(set(allowed_hosts))  # Remove duplicates
+
+# If no specific hosts configured, use APP_URL from Railway
+if len(ALLOWED_HOSTS) < 2 and not app_url:  # Only has default localhost/127.0.0.1
+    print("[DJANGO_SETTINGS] WARNING: No APP_URL environment variable set on Railway", flush=True)
+    print("[DJANGO_SETTINGS] Set ALLOWED_HOSTS env var or APP_URL for proper host validation", flush=True)
+    
 print(f"[DJANGO_SETTINGS] ALLOWED_HOSTS: {ALLOWED_HOSTS}", flush=True)
+print(f"[DJANGO_SETTINGS] APP_URL env: '{app_url}'", flush=True)
+print(f"[DJANGO_SETTINGS] ALLOWED_HOSTS env: '{allowed_hosts_str}'", flush=True)
 sys.stdout.flush()
 
 # Application definition
