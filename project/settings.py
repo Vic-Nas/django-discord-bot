@@ -1,13 +1,8 @@
 import os
 import sys
-import time
 from pathlib import Path
 from dotenv import load_dotenv
 import dj_database_url
-
-start_time = time.time()
-print(f"[DJANGO_SETTINGS] Starting settings.py load at {start_time}", flush=True)
-sys.stdout.flush()
 
 load_dotenv()
 
@@ -34,16 +29,6 @@ if app_url:
 
 ALLOWED_HOSTS = list(set(allowed_hosts))  # Remove duplicates
 
-# If no specific hosts configured, use APP_URL from Railway
-if len(ALLOWED_HOSTS) < 2 and not app_url:  # Only has default localhost/127.0.0.1
-    print("[DJANGO_SETTINGS] WARNING: No APP_URL environment variable set on Railway", flush=True)
-    print("[DJANGO_SETTINGS] Set ALLOWED_HOSTS env var or APP_URL for proper host validation", flush=True)
-    
-print(f"[DJANGO_SETTINGS] ALLOWED_HOSTS: {ALLOWED_HOSTS}", flush=True)
-print(f"[DJANGO_SETTINGS] APP_URL env: '{app_url}'", flush=True)
-print(f"[DJANGO_SETTINGS] ALLOWED_HOSTS env: '{allowed_hosts_str}'", flush=True)
-sys.stdout.flush()
-
 # Application definition
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -56,7 +41,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    'project.error_logging_middleware.ErrorLoggingMiddleware',  # Log ALL exceptions first
+    # 'project.error_logging_middleware.ErrorLoggingMiddleware',  # TEMPORARILY DISABLED - testing if it causes hang
     # Temporarily disable debug middleware to test if it's causing issues
     # 'project.debug_middleware.DebugRequestMiddleware',
     'django.middleware.security.SecurityMiddleware',
@@ -90,34 +75,16 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'project.wsgi.application'
 
-print("[DJANGO_SETTINGS] Building database config", flush=True)
-sys.stdout.flush()
-
 db_url = os.environ.get('DATABASE_URL')
-print(f"[DJANGO_SETTINGS] DATABASE_URL present: {bool(db_url)}", flush=True)
-sys.stdout.flush()
 
 if db_url:
-    print(f"[DJANGO_SETTINGS] DATABASE_URL starts with: {db_url[:20]}...", flush=True)
-    sys.stdout.flush()
-
-print("[DJANGO_SETTINGS] Parsing database URL with dj_database_url", flush=True)
-sys.stdout.flush()
-
-try:
     parsed_db = dj_database_url.parse(db_url)
-    print("[DJANGO_SETTINGS] Database URL parsed successfully", flush=True)
-    sys.stdout.flush()
-except Exception as e:
-    print(f"[DJANGO_SETTINGS] ERROR parsing database URL: {e}", flush=True)
-    sys.stdout.flush()
-    raise
+else:
+    parsed_db = {}
 
 DATABASES = {
     'default': parsed_db
 }
-
-print(f"[DJANGO_SETTINGS] Database config: {DATABASES['default'].get('ENGINE', 'unknown')}", flush=True)
 sys.stdout.flush()
 
 # Disable persistent database connections to handle worker fork properly
@@ -153,23 +120,9 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 import cloudinary
 
-print("[DJANGO_SETTINGS] Configuring Cloudinary", flush=True)
-cloudinary_start = time.time()
-sys.stdout.flush()
-
 cloudinary.config(
     cloud_name=os.getenv('CLOUDINARY_CLOUD_NAME'),
     api_key=os.getenv('CLOUDINARY_API_KEY'),
     api_secret=os.getenv('CLOUDINARY_API_SECRET'),
 )
-
-cloudinary_time = time.time() - cloudinary_start
-print(f"[DJANGO_SETTINGS] Cloudinary configured in {cloudinary_time:.2f}s", flush=True)
-sys.stdout.flush()
-
-
-print("[DJANGO_SETTINGS] Settings.py loaded successfully", flush=True)
-settings_total = time.time() - start_time
-print(f"[DJANGO_SETTINGS] Total settings load time: {settings_total:.2f}s", flush=True)
-sys.stdout.flush()
 
