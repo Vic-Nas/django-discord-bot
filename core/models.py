@@ -136,35 +136,25 @@ class Application(models.Model):
 
 
 class BotCommand(models.Model):
-    """Available bot commands (managed per server)"""
-    name = models.CharField(max_length=50)  # e.g., 'addrule', 'help'
-    description = models.TextField()
-    handler_function = models.CharField(max_length=100)  # Python function name
-    is_global = models.BooleanField(default=True)  # Available to all servers by default
+    """Bot command with per-server configuration (consolidated model)"""
+    guild = models.ForeignKey(GuildSettings, on_delete=models.CASCADE, related_name='commands', null=True, blank=True)
+    name = models.CharField(max_length=50, default='')  # e.g., 'addrule', 'help'
+    description = models.TextField(default='')
+    handler_function = models.CharField(max_length=100, default='')  # Python function name
     admin_only = models.BooleanField(default=False)
-    
-    class Meta:
-        db_table = 'bot_commands'
-    
-    def __str__(self):
-        return self.name
-
-
-class GuildCommand(models.Model):
-    """Per-server command configuration"""
-    guild = models.ForeignKey(GuildSettings, on_delete=models.CASCADE, related_name='commands')
-    command = models.ForeignKey(BotCommand, on_delete=models.CASCADE)
     enabled = models.BooleanField(default=True)
-    custom_name = models.CharField(max_length=50, blank=True)  # Override command name
+    custom_name = models.CharField(max_length=50, blank=True)  # Override command name for this server
     allowed_roles = models.ManyToManyField(DiscordRole, blank=True, related_name='allowed_commands')
     
     class Meta:
-        db_table = 'guild_commands'
-        unique_together = ['guild', 'command']
+        db_table = 'bot_commands'
+        unique_together = ['guild', 'name']
     
     def __str__(self):
-        name = self.custom_name or self.command.name
-        return f"{self.guild.guild_name}: {name} ({'ON' if self.enabled else 'OFF'})"
+        display_name = self.custom_name or self.name
+        status = 'ON' if self.enabled else 'OFF'
+        guild_name = self.guild.guild_name if self.guild else 'N/A'
+        return f"{guild_name}: {display_name} [{status}]"
 
 
 class MessageTemplate(models.Model):
