@@ -12,22 +12,9 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-change-this-in-production'
 
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
-# ALLOWED_HOSTS - include Railway and localhost for development
-allowed_hosts_str = os.getenv('ALLOWED_HOSTS', '*.up.railway.app,localhost,127.0.0.1')
-app_url = os.getenv('APP_URL', '')
-
-allowed_hosts = [h.strip() for h in allowed_hosts_str.split(',') if h.strip()]
-if app_url:
-    # Extract hostname from full URL if provided
-    if app_url.startswith('http'):
-        from urllib.parse import urlparse
-        hostname = urlparse(app_url).hostname
-        if hostname:
-            allowed_hosts.append(hostname)
-    else:
-        allowed_hosts.append(app_url)
-
-ALLOWED_HOSTS = list(set(allowed_hosts))  # Remove duplicates
+# ALLOWED_HOSTS - accept all hosts since auth is via Discord
+# In production, should restrict to specific domains
+ALLOWED_HOSTS = ['*']
 
 # Application definition
 INSTALLED_APPS = [
