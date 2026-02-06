@@ -1,6 +1,6 @@
 from core.models import GuildSettings, BotCommand
 from asgiref.sync import sync_to_async
-from execution.action_executor import execute_command_actions
+from bot.execution.action_executor import execute_command_actions
 
 
 class CommandRegistry:
