@@ -7,7 +7,10 @@ Each action type (SEND_MESSAGE, ADD_INVITE_RULE, LIST_RULES, etc) is executed wi
 
 import json
 import discord
+import secrets
 from asgiref.sync import sync_to_async
+from django.utils import timezone
+from datetime import timedelta
 
 
 class ExecutionError(Exception):
@@ -337,14 +340,13 @@ async def handle_webhook(bot, message, params):
 
 # ===== Real Command Logic Actions =====
 
-async def handle_add_invite_rule(bot, message, params, args):
+async def handle_add_invite_rule(bot, message, params, args, guild_settings):
     """ADD_INVITE_RULE: Add an invite code -> roles mapping"""
-    from core.models import InviteRule, DiscordRole, GuildSettings
+    from core.models import InviteRule, DiscordRole
+    from bot.handlers.templates import get_template_async
     
     if len(args) < 2:
         raise ExecutionError("Usage: `@Bot addrule <invite_code> <role1,role2,...> [description]`")
-    
-    guild_settings = await sync_to_async(GuildSettings.objects.get)(guild_id=message.guild.id)
     
     invite_code = args[0]
     role_names = args[1].split(',')
@@ -383,18 +385,19 @@ async def handle_add_invite_rule(bot, message, params, args):
     await sync_to_async(rule.roles.set)(roles_to_add)
     
     role_str = ', '.join([r.name for r in roles_to_add])
-    verb = "Created" if created else "Updated"
-    await message.channel.send(f"✅ {verb} rule: `{invite_code}` → {role_str}")
+    template = await get_template_async(guild_settings, 'COMMAND_SUCCESS')
+    msg = template.format(message=f"Invite rule created: `{invite_code}` → {role_str}")
+    await message.channel.send(msg)
 
 
-async def handle_delete_invite_rule(bot, message, params, args):
+async def handle_delete_invite_rule(bot, message, params, args, guild_settings):
     """DELETE_INVITE_RULE: Remove an invite rule"""
-    from core.models import InviteRule, GuildSettings
+    from core.models import InviteRule
+    from bot.handlers.templates import get_template_async
     
     if len(args) < 1:
         raise ExecutionError("Usage: `@Bot delrule <invite_code>`")
     
-    guild_settings = await sync_to_async(GuildSettings.objects.get)(guild_id=message.guild.id)
     invite_code = args[0]
     
     try:
@@ -403,16 +406,16 @@ async def handle_delete_invite_rule(bot, message, params, args):
             invite_code=invite_code
         )
         await sync_to_async(rule.delete)()
-        await message.channel.send(f"✅ Deleted rule: `{invite_code}`")
+        template = await get_template_async(guild_settings, 'COMMAND_SUCCESS')
+        msg = template.format(message=f"Invite rule deleted: `{invite_code}`")
+        await message.channel.send(msg)
     except:
         raise ExecutionError(f"Rule not found: `{invite_code}`")
 
 
-async def handle_list_invite_rules(bot, message, params):
+async def handle_list_invite_rules(bot, message, params, guild_settings):
     """LIST_INVITE_RULES: Show all invite rules"""
-    from core.models import InviteRule, GuildSettings
-    
-    guild_settings = await sync_to_async(GuildSettings.objects.get)(guild_id=message.guild.id)
+    from core.models import InviteRule
     
     rules = await sync_to_async(
         lambda: list(InviteRule.objects.filter(guild=guild_settings).prefetch_related('roles'))
@@ -435,10 +438,11 @@ async def handle_list_invite_rules(bot, message, params):
     await message.channel.send(embed=embed)
 
 
-async def handle_set_server_mode(bot, message, params, args):
+async def handle_set_server_mode(bot, message, params, args, guild_settings):
     """SET_SERVER_MODE: Change server from AUTO to APPROVAL"""
-    from core.models import GuildSettings, DiscordChannel
+    from core.models import DiscordChannel
     from bot.handlers.guild_setup import get_or_create_channel
+    from bot.handlers.templates import get_template_async
     
     if len(args) < 1:
         raise ExecutionError("Usage: `@Bot setmode <AUTO|APPROVAL>`")
@@ -448,7 +452,6 @@ async def handle_set_server_mode(bot, message, params, args):
     if mode not in ['AUTO', 'APPROVAL']:
         raise ExecutionError("Mode must be AUTO or APPROVAL")
     
-    guild_settings = await sync_to_async(GuildSettings.objects.get)(guild_id=message.guild.id)
     old_mode = guild_settings.mode
     guild_settings.mode = mode
     
@@ -467,14 +470,14 @@ async def handle_set_server_mode(bot, message, params, args):
             )
     
     await sync_to_async(guild_settings.save)()
-    await message.channel.send(f"✅ Server mode changed from **{old_mode}** to **{mode}**")
+    template = await get_template_async(guild_settings, 'COMMAND_SUCCESS')
+    msg = template.format(message=f"Server mode changed from **{old_mode}** to **{mode}**")
+    await message.channel.send(msg)
 
 
-async def handle_list_commands(bot, message, params):
+async def handle_list_commands(bot, message, params, guild_settings):
     """LIST_COMMANDS: Show all available commands"""
-    from core.models import BotCommand, GuildSettings
-    
-    guild_settings = await sync_to_async(GuildSettings.objects.get)(guild_id=message.guild.id)
+    from core.models import BotCommand
     
     commands = await sync_to_async(
         lambda: list(BotCommand.objects.filter(guild=guild_settings, enabled=True).order_by('name'))
@@ -488,30 +491,34 @@ async def handle_list_commands(bot, message, params):
     await message.channel.send(f"📋 **Available Commands:**\n{cmd_list}")
 
 
-async def handle_generate_access_token(bot, message, params):
+async def handle_generate_access_token(bot, message, params, guild_settings):
     """GENERATE_ACCESS_TOKEN: Create web panel access token"""
-    from core.models import GuildSettings, AccessToken
-    from datetime import datetime, timedelta
-    import secrets
-    
-    guild_settings = await sync_to_async(GuildSettings.objects.get)(guild_id=message.guild.id)
+    from core.models import AccessToken
+    from bot.handlers.templates import get_template_async
     
     # Check if user already has a token
     existing = await sync_to_async(
         lambda: AccessToken.objects.filter(
             user_id=message.author.id,
             guild=guild_settings,
-            expires_at__gt=datetime.now()
+            expires_at__gt=timezone.now()
         ).first()
     )()
     
     if existing:
-        await message.channel.send(f"ℹ️ You already have an active access link.")
+        expires_str = existing.expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')
+        access_url = f"`https://[your-domain]/access/{existing.token}`"
+        template = await get_template_async(guild_settings, 'GETACCESS_EXISTS')
+        try:
+            msg = template.format(url=access_url, expires=expires_str, user=message.author.mention)
+        except KeyError:
+            msg = template.format(url=access_url, expires=expires_str)
+        await message.channel.send(msg)
         return
     
     # Create new token
     token = secrets.token_urlsafe(32)
-    expires_at = datetime.now() + timedelta(hours=24)
+    expires_at = timezone.now() + timedelta(hours=24)
     
     await sync_to_async(AccessToken.objects.create)(
         token=token,
@@ -521,25 +528,24 @@ async def handle_generate_access_token(bot, message, params):
         expires_at=expires_at
     )
     
-    # Send DM with link
+    # Send response with token (in channel, not DM)
+    expires_str = expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')
+    access_url = f"`https://[your-domain]/access/{token}`"
+    template = await get_template_async(guild_settings, 'GETACCESS_RESPONSE')
     try:
-        # This would need a proper web URL
-        link = f"https://your-domain.com/access/{token}"
-        dm = await message.author.create_dm()
-        await dm.send(f"🔗 Your access link:\n{link}\n\nExpires in 24 hours.")
-        await message.channel.send(f"✅ Check your DMs for the access link.")
-    except:
-        await message.channel.send(f"⚠️ Couldn't send DM. Make sure DMs are enabled.")
+        msg = template.format(url=access_url, expires=expires_str)
+    except KeyError:
+        msg = template.format(url=access_url, expires=expires_str)
+    await message.channel.send(msg)
 
 
-async def handle_add_form_field(bot, message, params, args):
+async def handle_add_form_field(bot, message, params, args, guild_settings):
     """ADD_FORM_FIELD: Add a field to the application form"""
-    from core.models import FormField, GuildSettings
+    from core.models import FormField
+    from bot.handlers.templates import get_template_async
     
     if len(args) < 2:
         raise ExecutionError("Usage: `@Bot addfield <label> <type> [required]`")
-    
-    guild_settings = await sync_to_async(GuildSettings.objects.get)(guild_id=message.guild.id)
     
     label = args[0]
     field_type = args[1].lower()
@@ -562,14 +568,14 @@ async def handle_add_form_field(bot, message, params, args):
         order=max_order + 1
     )
     
-    await message.channel.send(f"✅ Added form field: **{label}** ({field_type})")
+    template = await get_template_async(guild_settings, 'COMMAND_SUCCESS')
+    msg = template.format(message=f"Added form field: **{label}** ({field_type})")
+    await message.channel.send(msg)
 
 
-async def handle_list_form_fields(bot, message, params):
+async def handle_list_form_fields(bot, message, params, guild_settings):
     """LIST_FORM_FIELDS: Show all form fields"""
-    from core.models import FormField, GuildSettings
-    
-    guild_settings = await sync_to_async(GuildSettings.objects.get)(guild_id=message.guild.id)
+    from core.models import FormField
     
     fields = await sync_to_async(
         lambda: list(FormField.objects.filter(guild=guild_settings).order_by('order'))
@@ -592,11 +598,10 @@ async def handle_list_form_fields(bot, message, params):
     await message.channel.send(embed=embed)
 
 
-async def handle_reload_config(bot, message, params):
+async def handle_reload_config(bot, message, params, guild_settings):
     """RELOAD_CONFIG: Sync roles and channels with Discord"""
-    from core.models import GuildSettings, DiscordRole, DiscordChannel
-    
-    guild_settings = await sync_to_async(GuildSettings.objects.get)(guild_id=message.guild.id)
+    from core.models import DiscordRole, DiscordChannel
+    from bot.handlers.templates import get_template_async
     
     # Sync all roles
     roles = message.guild.roles
@@ -616,4 +621,6 @@ async def handle_reload_config(bot, message, params):
             defaults={}
         )
     
-    await message.channel.send(f"✅ Reloaded configuration ({len(roles)} roles, {len(channels)} channels)")
+    template = await get_template_async(guild_settings, 'COMMAND_SUCCESS')
+    msg = template.format(message=f"Reloaded configuration ({len(roles)} roles, {len(channels)} channels)")
+    await message.channel.send(msg)
