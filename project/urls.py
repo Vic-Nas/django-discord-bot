@@ -1,5 +1,7 @@
 from django.contrib import admin
 from django.urls import path
+from django.conf import settings
+from django.conf.urls.static import static
 from core import views
 
 urlpatterns = [
@@ -11,3 +13,7 @@ urlpatterns = [
     path('auth/login/', views.token_login, name='token_login'),
     path('', views.home, name='home'),
 ]
+
+# Serve static files in development and production
+if settings.DEBUG or True:  # Always serve static files
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

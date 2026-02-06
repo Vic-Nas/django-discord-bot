@@ -64,9 +64,5 @@ def token_login(request):
 
 def home(request):
     """Simple home page"""
-    import sys
-    print("[HOME] Home view called", flush=True)
-    sys.stdout.flush()
-    sys.stderr.flush()
-    return HttpResponse('<html><body>Django bot web panel - OK</body></html>', content_type='text/html')
+    return render(request, 'home.html')
 

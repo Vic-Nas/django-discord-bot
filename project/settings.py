@@ -94,9 +94,10 @@ USE_TZ = True
 # Static files
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
-# Temporarily disable CompressedManifestStaticFilesStorage to see if that's causing hang
+STATICFILES_DIRS = [
+    BASE_DIR / 'project' / 'static',
+]
 STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
-# STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
