@@ -29,6 +29,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'project.debug_middleware.DebugRequestMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -91,11 +92,19 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 import cloudinary
+
+print("[DJANGO_SETTINGS] Configuring Cloudinary", flush=True)
+sys.stdout.flush()
+
 cloudinary.config(
     cloud_name=os.getenv('CLOUDINARY_CLOUD_NAME'),
     api_key=os.getenv('CLOUDINARY_API_KEY'),
     api_secret=os.getenv('CLOUDINARY_API_SECRET'),
 )
+
+print("[DJANGO_SETTINGS] Cloudinary configured", flush=True)
+sys.stdout.flush()
+
 
 print("[DJANGO_SETTINGS] Settings.py loaded successfully", flush=True)
 sys.stdout.flush()

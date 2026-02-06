@@ -7,11 +7,18 @@ from .models import AccessToken, GuildSettings
 
 def health_check(request):
     """Simple health check for Railway - no database access"""
+    import sys
+    print("[HEALTH_CHECK] Health check endpoint called", flush=True)
+    sys.stdout.flush()
     return JsonResponse({'status': 'healthy'}, status=200)
 
 
 def token_login(request):
     """Handle token-based authentication from Discord bot"""
+    import sys
+    print("[TOKEN_LOGIN] Token login view called", flush=True)
+    sys.stdout.flush()
+    
     token = request.GET.get('token')
     
     if not token:
@@ -46,4 +53,7 @@ def token_login(request):
 
 def home(request):
     """Simple home page"""
+    import sys
+    print("[HOME] Home view called", flush=True)
+    sys.stdout.flush()
     return render(request, 'home.html')
