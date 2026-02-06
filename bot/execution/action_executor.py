@@ -8,7 +8,6 @@ Each action type (SEND_MESSAGE, ASSIGN_ROLE, etc) is executed with parameters fr
 import json
 import discord
 from asgiref.sync import sync_to_async
-from core.models import CommandAction
 
 
 class ExecutionError(Exception):
@@ -70,26 +69,26 @@ async def execute_single_action(bot, message, action_obj):
     action_type = action_obj.type
     params = action_obj.parameters or {}
     
-    # Route to appropriate handler
-    if action_type == CommandAction.SEND_MESSAGE:
+    # Route to appropriate handler based on action type string
+    if action_type == 'SEND_MESSAGE':
         await handle_send_message(bot, message, params)
     
-    elif action_type == CommandAction.ASSIGN_ROLE:
+    elif action_type == 'ASSIGN_ROLE':
         await handle_assign_role(bot, message, params)
     
-    elif action_type == CommandAction.REMOVE_ROLE:
+    elif action_type == 'REMOVE_ROLE':
         await handle_remove_role(bot, message, params)
     
-    elif action_type == CommandAction.CREATE_CHANNEL:
+    elif action_type == 'CREATE_CHANNEL':
         await handle_create_channel(bot, message, params)
     
-    elif action_type == CommandAction.DELETE_CHANNEL:
+    elif action_type == 'DELETE_CHANNEL':
         await handle_delete_channel(bot, message, params)
     
-    elif action_type == CommandAction.POLL:
+    elif action_type == 'POLL':
         await handle_poll(bot, message, params)
     
-    elif action_type == CommandAction.WEBHOOK:
+    elif action_type == 'WEBHOOK':
         await handle_webhook(bot, message, params)
     
     else:
