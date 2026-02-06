@@ -34,7 +34,7 @@ from bot.execution.action_executor import (
     handle_generate_access_token,
     handle_reload_config,
 )
-from bot.main import bot as main_bot
+
 
 
 @pytest.mark.integration
@@ -44,37 +44,21 @@ class TestHandlersWithRealGuild:
     """Test handlers with real Discord guild objects"""
     
     @pytest.fixture(autouse=True)
-    async def setup_guild_connection(self):
-        """Connect to Discord and get real guild
-        
-        NOTE: These tests require the bot to be running separately.
-        The bot's main.run() should be active (running locally or on server).
-        """
+    async def setup_guild_connection(self, integration_bot):
+        """Use the real Discord bot connection"""
         test_guild_id = int(os.getenv('TEST_GUILD_ID', '0'))
-        token = os.getenv('DISCORD_TOKEN')
-        
-        if not token:
-            pytest.skip("DISCORD_TOKEN not set in .env")
         
         if test_guild_id == 0:
             pytest.skip("TEST_GUILD_ID not set in .env")
         
-        # Check if bot is already running and connected
-        # main_bot.user is set only when bot is logged in and connected
-        if main_bot.user is None:
-            pytest.skip(
-                "Bot is not connected. Integration tests require:\n"
-                "  1. Start bot: python manage.py runbot (or bot.run())\n"
-                "  2. Then run: pytest tests/test_integration.py -m integration -v\n"
-                "Bot needs to be connected to Discord gateway with guilds loaded."
-            )
-        
         # Get real guild from connected bot
-        self.guild = main_bot.get_guild(test_guild_id)
+        self.bot = integration_bot
+        self.guild = self.bot.get_guild(test_guild_id)
+        
         if not self.guild:
             pytest.skip(
                 f"Bot not in guild {test_guild_id}.\n"
-                f"Make sure bot is in the Discord guild before running integration tests."
+                f"Make sure bot is in the Discord guild."
             )
         
         # Get or create test guild settings
@@ -98,8 +82,7 @@ class TestHandlersWithRealGuild:
         
         # Create mock message with REAL guild object
         message = AsyncMock()
-        message.guild = self.guild  # Real Discord guild
-        message.guild.roles = self.guild.roles  # Real roles
+        message.guild = self.guild  # Real Discord guild - already has roles
         message.channel = AsyncMock()
         message.author = AsyncMock()
         message.author.id = 999999999999999999
@@ -108,7 +91,7 @@ class TestHandlersWithRealGuild:
         params = {}
         args = ['realrulecode', test_role.name]
         
-        await handle_add_invite_rule(main_bot, message, params, args, self.guild_settings)
+        await handle_add_invite_rule(self.bot, message, params, args, self.guild_settings)
         
         # Verify rule was created with real role
         rule = await sync_to_async(InviteRule.objects.get)(
@@ -137,7 +120,7 @@ class TestHandlersWithRealGuild:
         params = {}
         args = ['ruleto_delete']
         
-        await handle_delete_invite_rule(main_bot, message, params, args, self.guild_settings)
+        await handle_delete_invite_rule(self.bot, message, params, args, self.guild_settings)
         
         # Verify deleted
         exists = await sync_to_async(
@@ -163,7 +146,7 @@ class TestHandlersWithRealGuild:
         message = AsyncMock()
         message.channel = AsyncMock()
         
-        await handle_list_invite_rules(main_bot, message, {}, self.guild_settings)
+        await handle_list_invite_rules(self.bot, message, {}, self.guild_settings)
         
         # Verify send was called
         assert message.channel.send.called
@@ -181,13 +164,15 @@ class TestHandlersWithRealGuild:
         params = {}
         args = ['TestField', 'text']
         
-        await handle_add_form_field(main_bot, message, params, args, self.guild_settings)
+        await handle_add_form_field(self.bot, message, params, args, self.guild_settings)
         
         # Verify field was created
-        field = await sync_to_async(FormField.objects.filter)(
-            guild=self.guild_settings,
-            label='TestField'
-        ).first()
+        field = await sync_to_async(
+            lambda: FormField.objects.filter(
+                guild=self.guild_settings,
+                label='TestField'
+            ).first()
+        )()
         
         assert field is not None
         
@@ -201,9 +186,10 @@ class TestHandlersWithRealGuild:
         message.channel = AsyncMock()
         message.author = AsyncMock()
         message.author.id = 111111111111111111
+        message.author.name = 'TestUser'
         message.author.mention = '<@111111111111111111>'
         
-        await handle_generate_access_token(main_bot, message, {}, self.guild_settings)
+        await handle_generate_access_token(self.bot, message, {}, self.guild_settings)
         
         # Verify token was created
         token = await sync_to_async(
@@ -219,27 +205,28 @@ class TestHandlersWithRealGuild:
     async def test_set_server_mode(self):
         """Test setting server mode (AUTO/APPROVAL)"""
         message = AsyncMock()
+        message.guild = self.guild  # Use real guild
         message.channel = AsyncMock()
         
         params = {}
         args = ['AUTO']
         
-        await handle_set_server_mode(main_bot, message, params, args, self.guild_settings)
+        await handle_set_server_mode(self.bot, message, params, args, self.guild_settings)
         
         # Verify mode was set
         updated_settings = await sync_to_async(GuildSettings.objects.get)(
             guild_id=self.guild_settings.guild_id
         )
-        assert updated_settings.server_mode == 'AUTO'
+        assert updated_settings.mode == 'AUTO'
         
         # Test APPROVAL mode
         args = ['APPROVAL']
-        await handle_set_server_mode(main_bot, message, params, args, self.guild_settings)
+        await handle_set_server_mode(self.bot, message, params, args, self.guild_settings)
         
         updated_settings = await sync_to_async(GuildSettings.objects.get)(
             guild_id=self.guild_settings.guild_id
         )
-        assert updated_settings.server_mode == 'APPROVAL'
+        assert updated_settings.mode == 'APPROVAL'
     
     @pytest.mark.asyncio
     async def test_list_form_fields(self):
@@ -261,7 +248,7 @@ class TestHandlersWithRealGuild:
         message = AsyncMock()
         message.channel = AsyncMock()
         
-        await handle_list_form_fields(main_bot, message, {}, self.guild_settings)
+        await handle_list_form_fields(self.bot, message, {}, self.guild_settings)
         
         # Verify send was called
         assert message.channel.send.called
@@ -277,7 +264,7 @@ class TestHandlersWithRealGuild:
         message.channel = AsyncMock()
         
         # Should execute without errors
-        await handle_reload_config(main_bot, message, {}, self.guild_settings)
+        await handle_reload_config(self.bot, message, {}, self.guild_settings)
         
         # Verify send was called
         assert message.channel.send.called
@@ -294,7 +281,7 @@ class TestHandlersWithRealGuild:
         message_dm.author.mention = '<@222222222222222222>'
         
         # Should work fine in DM
-        await handle_list_commands(main_bot, message_dm, {}, self.guild_settings)
+        await handle_list_commands(self.bot, message_dm, {}, self.guild_settings)
         assert message_dm.channel.send.called
         
         # Server context
@@ -303,7 +290,7 @@ class TestHandlersWithRealGuild:
         message_server.channel = AsyncMock()
         
         # Should also work in server
-        await handle_list_commands(main_bot, message_server, {}, self.guild_settings)
+        await handle_list_commands(self.bot, message_server, {}, self.guild_settings)
         assert message_server.channel.send.called
 
 

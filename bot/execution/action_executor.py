@@ -10,6 +10,7 @@ import discord
 import secrets
 from asgiref.sync import sync_to_async
 from django.utils import timezone
+from django.db.models import Max
 from datetime import timedelta
 
 
@@ -549,7 +550,7 @@ async def handle_add_form_field(bot, message, params, args, guild_settings):
     
     label = args[0]
     field_type = args[1].lower()
-    required = 'true' if len(args) < 3 or args[2].lower() != 'false' else False
+    required = True if len(args) < 3 or args[2].lower() != 'false' else False
     
     valid_types = ['text', 'textarea', 'select', 'radio', 'checkbox', 'file']
     if field_type not in valid_types:
@@ -557,7 +558,7 @@ async def handle_add_form_field(bot, message, params, args, guild_settings):
     
     # Get max order
     max_order = await sync_to_async(
-        lambda: FormField.objects.filter(guild=guild_settings).aggregate(max_order=max('order'))['max_order'] or 0
+        lambda: FormField.objects.filter(guild=guild_settings).aggregate(max_order=Max('order'))['max_order'] or 0
     )()
     
     await sync_to_async(FormField.objects.create)(

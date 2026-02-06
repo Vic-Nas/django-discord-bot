@@ -2,6 +2,8 @@
 Pytest configuration and fixtures for integration tests
 """
 import os
+import asyncio
+import threading
 from pathlib import Path
 
 # Load .env file before anything else
@@ -18,6 +20,8 @@ django.setup()
 import pytest
 from asgiref.sync import async_to_sync
 from core.models import GuildSettings, BotCommand, CommandAction
+import discord
+from discord.ext import commands
 
 
 @pytest.fixture
@@ -80,3 +84,69 @@ def test_commands(test_guild):
 def db_session():
     """Enable database access in tests"""
     return None
+
+
+@pytest.fixture(scope='session')
+def integration_bot():
+    """
+    Start discord bot for integration tests.
+    
+    Bot runs in background thread during tests.
+    Automatically connects to Discord and loads guilds.
+    """
+    token = os.getenv('DISCORD_TOKEN')
+    if not token:
+        pytest.skip("DISCORD_TOKEN not set - integration tests skipped")
+        return None
+    
+    # Create bot instance for testing
+    intents = discord.Intents.default()
+    intents.members = True
+    intents.guilds = True
+    intents.invites = True
+    intents.message_content = True
+    
+    test_bot = commands.Bot(command_prefix="!", intents=intents)
+    test_bot.remove_command('help')
+    
+    # Track if successfully connected
+    ready_event = asyncio.Event()
+    
+    @test_bot.event
+    async def on_ready():
+        print(f"\n🤖 Test bot connected: {test_bot.user.name}")
+        print(f"📋 Loaded {len(test_bot.guilds)} guilds")
+        ready_event.set()
+    
+    async def run_bot():
+        """Run bot in background"""
+        try:
+            await test_bot.start(token)
+        except KeyboardInterrupt:
+            pass
+        except Exception as e:
+            print(f"❌ Bot error: {e}")
+    
+    # Start bot in background thread
+    def bot_thread():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(run_bot())
+    
+    thread = threading.Thread(target=bot_thread, daemon=True)
+    thread.start()
+    
+    # Wait for bot to be ready (timeout 30 seconds)
+    try:
+        asyncio.run(asyncio.wait_for(ready_event.wait(), timeout=30))
+    except asyncio.TimeoutError:
+        pytest.skip("Bot failed to connect within 30 seconds")
+    
+    yield test_bot
+    
+    # Cleanup on test completion
+    try:
+        if test_bot and test_bot.user:
+            asyncio.run(test_bot.close())
+    except:
+        pass
