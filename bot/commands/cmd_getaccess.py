@@ -75,10 +75,11 @@ async def cmd_getaccess(bot, message, args, guild_settings, invite_cache):
         # Return existing token
         app_url = os.getenv('APP_URL', 'http://localhost:8000')
         url = f"{app_url}/auth/login?token={existing_token.token}"
+        url_link = f"[🔗 Access Admin Panel]({url})"
         
         template = await get_template_async(guild_settings, 'GETACCESS_EXISTS')
         msg = template.format(
-            url=url,
+            url=url_link,
             expires=existing_token.expires_at.strftime('%Y-%m-%d %H:%M UTC')
         )
         
@@ -97,10 +98,11 @@ async def cmd_getaccess(bot, message, args, guild_settings, invite_cache):
     
     app_url = os.getenv('APP_URL', 'http://localhost:8000')
     url = f"{app_url}/auth/login?token={token.token}"
+    url_link = f"[🔗 Access Admin Panel]({url})"
     
     template = await get_template_async(guild_settings, 'GETACCESS_RESPONSE')
     msg = template.format(
-        url=url,
+        url=url_link,
         expires=expires.strftime('%Y-%m-%d %H:%M UTC')
     )
     
