@@ -48,13 +48,14 @@ async def setup_guild(bot, guild):
     )
     
     # Assign BotAdmin role to bot itself
+    assignment_failed = False
     try:
         await guild.me.add_roles(bot_admin_role)
         print(f"✅ Assigned BotAdmin role to bot in {guild.name}")
     except Exception as e:
+        assignment_failed = True
         print(f"❌ Failed to assign BotAdmin role to bot in {guild.name}: {e}")
         print(f"   Bot permissions: {guild.me.guild_permissions}")
-        pass  # Might fail if bot doesn't have Manage Roles permission
     
     # Create #bounce channel (private, BotAdmin only)
     bounce_channel = await get_or_create_channel(guild, "bounce", bot_admin_role)
@@ -68,6 +69,42 @@ async def setup_guild(bot, guild):
     )
     
     await sync_to_async(guild_settings.save)()
+    
+    # Send diagnostic message if setup encountered issues
+    if assignment_failed:
+        try:
+            bot_role = guild.me.top_role
+            bot_role_name = bot_role.name if bot_role.name != "@everyone" else "(no assigned role)"
+            
+            diagnostic_msg = (
+                f"⚠️ **Setup Issue Detected**\n\n"
+                f"I couldn't assign the BotAdmin role to myself. My role is: **{bot_role_name}**\n\n"
+                f"**Possible fixes:**\n"
+                f"1. **Role Hierarchy**: In Server Settings → Roles, make sure my role (**{bot_role_name}**) is positioned **above** BotAdmin in the hierarchy\n"
+                f"2. **Permissions**: Make sure I have the \"Manage Roles\" permission\n"
+                f"3. **Re-add the bot**: Kick me from the server and add me back (this might trigger a fresh setup)\n\n"
+                f"I need this to manage BotAdmin role assignments and channel permissions."
+            )
+            await bounce_channel.send(diagnostic_msg)
+        except Exception:
+            # Fallback to general channel
+            try:
+                general = discord.utils.get(guild.text_channels, name='general')
+                if general:
+                    bot_role = guild.me.top_role
+                    bot_role_name = bot_role.name if bot_role.name != "@everyone" else "(no assigned role)"
+                    diagnostic_msg = (
+                        f"⚠️ **Setup Issue Detected**\n\n"
+                        f"I couldn't assign the BotAdmin role to myself. My role is: **{bot_role_name}**\n\n"
+                        f"**Possible fixes:**\n"
+                        f"1. **Role Hierarchy**: In Server Settings → Roles, make sure my role (**{bot_role_name}**) is positioned **above** BotAdmin in the hierarchy\n"
+                        f"2. **Permissions**: Make sure I have the \"Manage Roles\" permission\n"
+                        f"3. **Re-add the bot**: Kick me from the server and add me back (this might trigger a fresh setup)\n\n"
+                        f"I need this to manage BotAdmin role assignments and channel permissions."
+                    )
+                    await general.send(diagnostic_msg)
+            except Exception:
+                print(f"Could not send diagnostic message to any channel")
     
     # Send welcome message to bounce channel
     try:
