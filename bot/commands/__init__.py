@@ -78,6 +78,14 @@ class CommandRegistry:
         """Get list of commands available to a user"""
         available = []
         
+        # In DM context (guild_settings is None), only show getaccess
+        if guild_settings is None:
+            return [{
+                'name': 'getaccess',
+                'description': self.commands['getaccess']['description'],
+                'admin_only': False
+            }]
+        
         for name, info in self.commands.items():
             # Check if enabled
             try:
