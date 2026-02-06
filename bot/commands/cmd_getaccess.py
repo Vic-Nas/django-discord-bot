@@ -27,10 +27,10 @@ async def cmd_getaccess(bot, message, args, guild_settings, invite_cache):
         
         try:
             settings = await sync_to_async(GuildSettings.objects.get)(guild_id=guild.id)
-            admin_role = guild.get_role(settings.bot_admin_role_id)
-            
-            if admin_role and admin_role in member.roles:
-                user_guilds.append({'guild': guild, 'settings': settings})
+            if settings.bot_admin_role_id:
+                admin_role = guild.get_role(settings.bot_admin_role_id)
+                if admin_role and admin_role in member.roles:
+                    user_guilds.append({'guild': guild, 'settings': settings})
         except GuildSettings.DoesNotExist:
             continue
     

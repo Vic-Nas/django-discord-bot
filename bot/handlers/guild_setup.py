@@ -63,15 +63,15 @@ async def setup_guild(bot, guild):
     # Send welcome message to logs
     try:
         template = await get_template_async(guild_settings, 'INSTALL_WELCOME')
-        message = template.format(
+        message = template.content.format(
             bot_admin=bot_admin_role.mention,
             pending=pending_role.mention,
             logs=logs_channel.mention,
             bot_mention=bot.user.mention
         )
         await logs_channel.send(message)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Failed to send welcome message: {e}")
 
 
 async def get_or_create_role(guild, name, **kwargs):

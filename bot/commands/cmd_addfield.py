@@ -47,10 +47,10 @@ async def cmd_addfield(bot, message, args, guild_settings, invite_cache):
             return
     
     # Get next order number
-    max_order = FormField.objects.filter(guild=guild_settings).count()
+    max_order = await sync_to_async(lambda: FormField.objects.filter(guild=guild_settings).count())()
     
     # Create field
-    field = FormField.objects.create(
+    await sync_to_async(FormField.objects.create)(
         guild=guild_settings,
         label=label,
         field_type=field_type,
@@ -59,8 +59,8 @@ async def cmd_addfield(bot, message, args, guild_settings, invite_cache):
         order=max_order
     )
     
-    template = get_template(guild_settings, 'COMMAND_SUCCESS')
-    msg = template.format(
+    template = await get_template_async(guild_settings, 'COMMAND_SUCCESS')
+    msg = template.content.format(
         message=f"Form field added: **{label}** ({field_type})"
     )
     
