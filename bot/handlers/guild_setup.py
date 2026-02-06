@@ -50,7 +50,10 @@ async def setup_guild(bot, guild):
     # Assign BotAdmin role to bot itself
     try:
         await guild.me.add_roles(bot_admin_role)
-    except Exception:
+        print(f"✅ Assigned BotAdmin role to bot in {guild.name}")
+    except Exception as e:
+        print(f"❌ Failed to assign BotAdmin role to bot in {guild.name}: {e}")
+        print(f"   Bot permissions: {guild.me.guild_permissions}")
         pass  # Might fail if bot doesn't have Manage Roles permission
     
     # Create #bounce channel (private, BotAdmin only)
