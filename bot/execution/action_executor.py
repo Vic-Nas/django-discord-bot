@@ -15,7 +15,7 @@ class ExecutionError(Exception):
     pass
 
 
-async def execute_command_actions(bot, message, command_obj, args=None):
+async def execute_command_actions(bot, message, command_obj, guild_settings, args=None):
     """
     Execute all CommandActions for a BotCommand in order.
     
@@ -23,6 +23,7 @@ async def execute_command_actions(bot, message, command_obj, args=None):
         bot: discord.py Bot instance
         message: discord.Message that triggered the command
         command_obj: BotCommand instance from database
+        guild_settings: GuildSettings instance for this server
         args: List of command arguments (optional)
     
     Returns:
@@ -46,7 +47,7 @@ async def execute_command_actions(bot, message, command_obj, args=None):
     # Execute each action
     for action in actions:
         try:
-            await execute_single_action(bot, message, action, args)
+            await execute_single_action(bot, message, action, guild_settings, args)
             results.append((True, f"✅ {action.name}"))
         except ExecutionError as e:
             results.append((False, f"❌ {action.name}: {str(e)}"))
@@ -57,7 +58,7 @@ async def execute_command_actions(bot, message, command_obj, args=None):
     return results
 
 
-async def execute_single_action(bot, message, action_obj, args=None):
+async def execute_single_action(bot, message, action_obj, guild_settings, args=None):
     """
     Execute a single CommandAction.
     
@@ -65,6 +66,7 @@ async def execute_single_action(bot, message, action_obj, args=None):
         bot: discord.py Bot instance
         message: discord.Message that triggered the command
         action_obj: CommandAction instance
+        guild_settings: GuildSettings instance
         args: List of command arguments
         
     Raises:
@@ -100,31 +102,31 @@ async def execute_single_action(bot, message, action_obj, args=None):
         await handle_webhook(bot, message, params)
     
     elif action_type == 'ADD_INVITE_RULE':
-        await handle_add_invite_rule(bot, message, params, args)
+        await handle_add_invite_rule(bot, message, params, args, guild_settings)
     
     elif action_type == 'DELETE_INVITE_RULE':
-        await handle_delete_invite_rule(bot, message, params, args)
+        await handle_delete_invite_rule(bot, message, params, args, guild_settings)
     
     elif action_type == 'LIST_INVITE_RULES':
-        await handle_list_invite_rules(bot, message, params)
+        await handle_list_invite_rules(bot, message, params, guild_settings)
     
     elif action_type == 'SET_SERVER_MODE':
-        await handle_set_server_mode(bot, message, params, args)
+        await handle_set_server_mode(bot, message, params, args, guild_settings)
     
     elif action_type == 'LIST_COMMANDS':
-        await handle_list_commands(bot, message, params)
+        await handle_list_commands(bot, message, params, guild_settings)
     
     elif action_type == 'GENERATE_ACCESS_TOKEN':
-        await handle_generate_access_token(bot, message, params)
+        await handle_generate_access_token(bot, message, params, guild_settings)
     
     elif action_type == 'ADD_FORM_FIELD':
-        await handle_add_form_field(bot, message, params, args)
+        await handle_add_form_field(bot, message, params, args, guild_settings)
     
     elif action_type == 'LIST_FORM_FIELDS':
-        await handle_list_form_fields(bot, message, params)
+        await handle_list_form_fields(bot, message, params, guild_settings)
     
     elif action_type == 'RELOAD_CONFIG':
-        await handle_reload_config(bot, message, params)
+        await handle_reload_config(bot, message, params, guild_settings)
     
     else:
         raise ExecutionError(f"Unknown action type: {action_type}")

@@ -22,18 +22,31 @@ class CommandRegistry:
             invite_cache: Invite cache dict for member tracking
         """
         
-        # Get guild settings (must exist for guild commands)
-        guild_settings = None
-        if message.guild:
+        # Special handling for getaccess - allows DM
+        if command_name == 'getaccess':
+            if message.guild:
+                # In server, look up guild settings
+                try:
+                    guild_settings = await sync_to_async(GuildSettings.objects.get)(guild_id=message.guild.id)
+                except GuildSettings.DoesNotExist:
+                    await message.channel.send("❌ This server is not configured. Please contact a server administrator.")
+                    return
+            else:
+                # In DM, we can't determine guild - getaccess requires a guild context
+                await message.channel.send("❌ This command must be used in a server.")
+                return
+        else:
+            # All other commands require server context
+            if not message.guild:
+                await message.channel.send("❌ Commands only work in servers.")
+                return
+            
+            # Get guild settings (must exist for guild commands)
             try:
                 guild_settings = await sync_to_async(GuildSettings.objects.get)(guild_id=message.guild.id)
             except GuildSettings.DoesNotExist:
                 await message.channel.send("❌ This server is not configured. Please contact a server administrator.")
                 return
-        else:
-            # DM context
-            await message.channel.send("❌ Commands only work in servers.")
-            return
         
         # Look up command in database
         try:
@@ -63,7 +76,7 @@ class CommandRegistry:
         print(f"📤 Executing command '{command_name}' on server {message.guild.name}")
         
         try:
-            results = await execute_command_actions(bot, message, bot_cmd, args)
+            results = await execute_command_actions(bot, message, bot_cmd, guild_settings, args)
             
             # Log results
             for success, status_msg in results:
