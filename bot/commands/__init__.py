@@ -1,4 +1,4 @@
-from core.models import GuildSettings, BotCommand, GuildCommand
+from core.models import GuildSettings, BotCommand
 from django.core.exceptions import ObjectDoesNotExist
 from asgiref.sync import sync_to_async
 
@@ -38,16 +38,15 @@ class CommandRegistry:
         
         # Check if command is enabled for this guild
         try:
-            bot_cmd = await sync_to_async(BotCommand.objects.get)(name=command_name)
-            guild_cmd = await sync_to_async(GuildCommand.objects.get)(guild=guild_settings, command=bot_cmd)
+            bot_cmd = await sync_to_async(BotCommand.objects.get)(guild=guild_settings, name=command_name)
             
-            enabled = await sync_to_async(lambda: guild_cmd.enabled)()
+            enabled = await sync_to_async(lambda: bot_cmd.enabled)()
             if not enabled:
                 await message.channel.send(f"❌ Command `{command_name}` is disabled on this server.")
                 return
             
             # Check if user has permission
-            has_roles = await sync_to_async(guild_cmd.allowed_roles.exists)()
+            has_roles = await sync_to_async(bot_cmd.allowed_roles.exists)()
             if has_roles:
                 user_role_ids = [role.id for role in message.author.roles]
                 allowed_role_ids = await sync_to_async(lambda: list(guild_cmd.allowed_roles.values_list('discord_id', flat=True)))()
@@ -56,7 +55,7 @@ class CommandRegistry:
                     await message.channel.send("❌ You don't have permission to use this command.")
                     return
             
-        except (BotCommand.DoesNotExist, GuildCommand.DoesNotExist):
+        except BotCommand.DoesNotExist:
             # Command not in DB, use default behavior
             pass
         
@@ -89,22 +88,21 @@ class CommandRegistry:
         for name, info in self.commands.items():
             # Check if enabled
             try:
-                bot_cmd = BotCommand.objects.get(name=name)
-                guild_cmd = GuildCommand.objects.get(guild=guild_settings, command=bot_cmd)
+                bot_cmd = BotCommand.objects.get(guild=guild_settings, name=name)
                 
-                enabled = guild_cmd.enabled
+                enabled = bot_cmd.enabled
                 if not enabled:
                     continue
                 
                 # Check permissions
-                if guild_cmd.allowed_roles.exists():
+                if bot_cmd.allowed_roles.exists():
                     user_role_ids = [role.id for role in user_roles]
-                    allowed_role_ids = list(guild_cmd.allowed_roles.values_list('discord_id', flat=True))
+                    allowed_role_ids = list(bot_cmd.allowed_roles.values_list('discord_id', flat=True))
                     
                     if not any(rid in allowed_role_ids for rid in user_role_ids):
                         continue
                 
-            except (BotCommand.DoesNotExist, GuildCommand.DoesNotExist):
+            except BotCommand.DoesNotExist:
                 pass
             
             available.append({
