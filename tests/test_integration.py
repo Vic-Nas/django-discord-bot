@@ -45,7 +45,11 @@ class TestHandlersWithRealGuild:
     
     @pytest.fixture(autouse=True)
     async def setup_guild_connection(self):
-        """Connect to Discord and get real guild"""
+        """Connect to Discord and get real guild
+        
+        NOTE: These tests require the bot to be running separately.
+        The bot's main.run() should be active (running locally or on server).
+        """
         test_guild_id = int(os.getenv('TEST_GUILD_ID', '0'))
         token = os.getenv('DISCORD_TOKEN')
         
@@ -55,14 +59,23 @@ class TestHandlersWithRealGuild:
         if test_guild_id == 0:
             pytest.skip("TEST_GUILD_ID not set in .env")
         
-        # Check if bot is already connected
+        # Check if bot is already running and connected
+        # main_bot.user is set only when bot is logged in and connected
         if main_bot.user is None:
-            pytest.skip("Bot is not running. Integration tests require bot to be active.")
+            pytest.skip(
+                "Bot is not connected. Integration tests require:\n"
+                "  1. Start bot: python manage.py runbot (or bot.run())\n"
+                "  2. Then run: pytest tests/test_integration.py -m integration -v\n"
+                "Bot needs to be connected to Discord gateway with guilds loaded."
+            )
         
-        # Get real guild from already-connected bot
+        # Get real guild from connected bot
         self.guild = main_bot.get_guild(test_guild_id)
         if not self.guild:
-            pytest.skip(f"Guild {test_guild_id} not found")
+            pytest.skip(
+                f"Bot not in guild {test_guild_id}.\n"
+                f"Make sure bot is in the Discord guild before running integration tests."
+            )
         
         # Get or create test guild settings
         self.guild_settings, _ = await sync_to_async(GuildSettings.objects.get_or_create)(
@@ -70,10 +83,7 @@ class TestHandlersWithRealGuild:
             defaults={'guild_name': f'Test-{self.guild.name}'}
         )
         
-        self.connected = False
         yield
-        
-        # Cleanup (no need to close since bot was already running)
     
     @pytest.mark.asyncio
     async def test_add_invite_rule_with_real_roles(self):
