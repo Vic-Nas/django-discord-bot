@@ -2,6 +2,12 @@
 Pytest configuration and fixtures for integration tests
 """
 import os
+from pathlib import Path
+
+# Load .env file before anything else
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent / '.env')
+
 import django
 from django.conf import settings
 
