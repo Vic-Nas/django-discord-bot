@@ -3,16 +3,20 @@ from django.urls import path
 from django.conf import settings
 from django.conf.urls.static import static
 from django.views.static import serve
+from django.http import FileResponse, HttpResponseNotFound
 from core import views
+import os
 
 def favicon(request):
     """Serve favicon.png directly from project/static"""
-    import os
-    favicon_path = os.path.join(settings.BASE_DIR, 'project', 'static', 'favicon.png')
-    if os.path.exists(favicon_path):
-        return serve(request, 'favicon.png', document_root=os.path.join(settings.BASE_DIR, 'project', 'static'))
-    # Fallback to collected static files
-    return serve(request, 'favicon.png', document_root=settings.STATIC_ROOT)
+    try:
+        favicon_path = os.path.join(settings.BASE_DIR, 'project', 'static', 'favicon.png')
+        if os.path.exists(favicon_path):
+            return FileResponse(open(favicon_path, 'rb'), content_type='image/png')
+    except Exception:
+        pass
+    # If favicon not found, return 404
+    return HttpResponseNotFound('Favicon not found')
 
 urlpatterns = [
     path('favicon.png', favicon),
