@@ -85,12 +85,8 @@ else:
 DATABASES = {
     'default': parsed_db
 }
-sys.stdout.flush()
 
 # Disable persistent database connections to handle worker fork properly
-print("[DJANGO_SETTINGS] Disabling persistent connections", flush=True)
-sys.stdout.flush()
-
 DATABASES['default']['CONN_MAX_AGE'] = 0
 DATABASES['default']['AUTOCOMMIT'] = True
 
