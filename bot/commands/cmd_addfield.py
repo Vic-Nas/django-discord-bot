@@ -1,5 +1,6 @@
 from core.models import FormField
-from handlers.templates import get_template
+from handlers.templates import get_template_async
+from asgiref.sync import sync_to_async
 
 
 async def cmd_addfield(bot, message, args, guild_settings, invite_cache):

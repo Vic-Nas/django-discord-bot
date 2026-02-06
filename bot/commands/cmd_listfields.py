@@ -1,13 +1,14 @@
 import discord
 from core.models import FormField
+from asgiref.sync import sync_to_async
 
 
 async def cmd_listfields(bot, message, args, guild_settings, invite_cache):
     """List all form fields"""
     
-    fields = FormField.objects.filter(guild=guild_settings).order_by('order')
+    fields = await sync_to_async(lambda: list(FormField.objects.filter(guild=guild_settings).order_by('order')))()
     
-    if not fields.exists():
+    if not fields:
         await message.channel.send("📋 No form fields configured yet.")
         return
     

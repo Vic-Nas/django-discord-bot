@@ -2,7 +2,8 @@ import os
 from django.utils import timezone
 from datetime import timedelta
 from core.models import AccessToken, GuildSettings
-from handlers.templates import get_template
+from handlers.templates import get_template_async
+from asgiref.sync import sync_to_async
 
 
 async def cmd_getaccess(bot, message, args, guild_settings, invite_cache):
@@ -25,7 +26,7 @@ async def cmd_getaccess(bot, message, args, guild_settings, invite_cache):
             continue
         
         try:
-            settings = GuildSettings.objects.get(guild_id=guild.id)
+            settings = await sync_to_async(GuildSettings.objects.get)(guild_id=guild.id)
             admin_role = guild.get_role(settings.bot_admin_role_id)
             
             if admin_role and admin_role in member.roles:
@@ -64,18 +65,18 @@ async def cmd_getaccess(bot, message, args, guild_settings, invite_cache):
     guild_settings = selected_guild['settings']
     
     # Check for existing valid token
-    existing_token = AccessToken.objects.filter(
+    existing_token = await sync_to_async(lambda: AccessToken.objects.filter(
         user_id=message.author.id,
         guild=guild_settings,
         expires_at__gt=timezone.now()
-    ).first()
+    ).first())()
     
     if existing_token:
         # Return existing token
         app_url = os.getenv('APP_URL', 'http://localhost:8000')
         url = f"{app_url}/auth/login?token={existing_token.token}"
         
-        template = get_template(guild_settings, 'GETACCESS_EXISTS')
+        template = await get_template_async(guild_settings, 'GETACCESS_EXISTS')
         msg = template.format(
             url=url,
             expires=existing_token.expires_at.strftime('%Y-%m-%d %H:%M UTC')
@@ -87,7 +88,7 @@ async def cmd_getaccess(bot, message, args, guild_settings, invite_cache):
     # Create new token
     expires = timezone.now() + timedelta(hours=24)
     
-    token = AccessToken.objects.create(
+    token = await sync_to_async(AccessToken.objects.create)(
         user_id=message.author.id,
         user_name=str(message.author),
         guild=guild_settings,
@@ -97,7 +98,7 @@ async def cmd_getaccess(bot, message, args, guild_settings, invite_cache):
     app_url = os.getenv('APP_URL', 'http://localhost:8000')
     url = f"{app_url}/auth/login?token={token.token}"
     
-    template = get_template(guild_settings, 'GETACCESS_RESPONSE')
+    template = await get_template_async(guild_settings, 'GETACCESS_RESPONSE')
     msg = template.format(
         url=url,
         expires=expires.strftime('%Y-%m-%d %H:%M UTC')

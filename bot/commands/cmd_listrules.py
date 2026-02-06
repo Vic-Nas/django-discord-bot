@@ -1,13 +1,14 @@
 import discord
 from core.models import InviteRule
+from asgiref.sync import sync_to_async
 
 
 async def cmd_listrules(bot, message, args, guild_settings, invite_cache):
     """List all invite rules"""
     
-    rules = InviteRule.objects.filter(guild=guild_settings).prefetch_related('roles')
+    rules = await sync_to_async(lambda: list(InviteRule.objects.filter(guild=guild_settings).prefetch_related('roles')))()
     
-    if not rules.exists():
+    if not rules:
         await message.channel.send("📋 No rules configured yet.")
         return
     
@@ -18,7 +19,7 @@ async def cmd_listrules(bot, message, args, guild_settings, invite_cache):
     
     for rule in rules:
         role_names = ', '.join([r.name for r in rule.roles.filter(is_deleted=False)])
-        deleted_roles = rule.roles.filter(is_deleted=True).count()
+        deleted_roles = await sync_to_async(rule.roles.filter)(is_deleted=True).count()
         
         value = f"**Roles:** {role_names if role_names else 'None'}"
         
