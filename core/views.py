@@ -6,8 +6,8 @@ from .models import AccessToken, GuildSettings
 
 
 def health_check(request):
-    """Simple health check for Railway"""
-    return JsonResponse({'status': 'ok'})
+    """Simple health check for Railway - no database access"""
+    return JsonResponse({'status': 'healthy'}, status=200)
 
 
 def token_login(request):
