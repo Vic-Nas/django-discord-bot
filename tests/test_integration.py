@@ -295,9 +295,24 @@ class TestHandlersWithRealGuild:
 
 
 @pytest.mark.integration
-@pytest.mark.django_db
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
 class TestCommandDatabase:
     """Verify commands match database state"""
+    
+    @pytest.fixture(autouse=True)
+    async def setup_database(self, integration_bot):
+        """Setup: ensure guild exists in database"""
+        test_guild_id = int(os.getenv('TEST_GUILD_ID', '0'))
+        if test_guild_id == 0:
+            pytest.skip("TEST_GUILD_ID not set")
+        
+        # Get or create test guild settings
+        self.guild_settings, _ = await sync_to_async(GuildSettings.objects.get_or_create)(
+            guild_id=test_guild_id,
+            defaults={'guild_name': f'Test Guild'}
+        )
+        yield
     
     def test_all_9_commands_configured(self):
         """Verify all 9 commands exist with correct actions"""

@@ -1,10 +1,17 @@
 from django.core.management.base import BaseCommand
-from core.models import MessageTemplate, BotCommand
+from core.models import MessageTemplate, GuildSettings, BotCommand, CommandAction
 from bot.handlers.templates import DEFAULT_TEMPLATES
 
 
 class Command(BaseCommand):
-    help = 'Initialize default message templates and bot commands'
+    help = 'Initialize default message templates and bot commands for a guild'
+    
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--guild_id',
+            type=int,
+            help='Guild ID to initialize. If not provided, initializes all guilds.'
+        )
 
     def handle(self, *args, **options):
         # Initialize message templates
@@ -27,34 +34,121 @@ class Command(BaseCommand):
                 else:
                     self.stdout.write(f'  - Template exists: {template_type}')
         
-        # Initialize bot commands
+        # Initialize bot commands per guild
         self.stdout.write('\nInitializing bot commands...')
         
+        guild_id = options.get('guild_id')
+        if guild_id:
+            guilds = GuildSettings.objects.filter(guild_id=guild_id)
+            if not guilds.exists():
+                self.stdout.write(self.style.ERROR(f'Guild {guild_id} not found in database'))
+                return
+        else:
+            guilds = GuildSettings.objects.all()
+        
+        if not guilds.exists():
+            self.stdout.write(self.style.WARNING('No guilds found. Add bot to Discord server first.'))
+            return
+        
         commands_data = [
-            ('help', 'Show available commands', 'cmd_help', False),
-            ('addrule', 'Add invite rule', 'cmd_addrule', True),
-            ('delrule', 'Delete invite rule', 'cmd_delrule', True),
-            ('listrules', 'List all invite rules', 'cmd_listrules', True),
-            ('setmode', 'Set server mode (AUTO/APPROVAL)', 'cmd_setmode', True),
-            ('reload', 'Sync roles/channels with Discord', 'cmd_reload', True),
-            ('getaccess', 'Get web panel access token', 'cmd_getaccess', False),
-            ('addfield', 'Add application form field', 'cmd_addfield', True),
-            ('listfields', 'List application form fields', 'cmd_listfields', True),
+            {
+                'name': 'help',
+                'description': 'Show available commands and how to use them',
+                'actions': [
+                    {'type': 'LIST_COMMANDS', 'name': 'show_commands', 'parameters': {}},
+                ]
+            },
+            {
+                'name': 'getaccess',
+                'description': 'Get a temporary access link to the web panel',
+                'actions': [
+                    {'type': 'GENERATE_ACCESS_TOKEN', 'name': 'create_token', 'parameters': {}},
+                ]
+            },
+            {
+                'name': 'addrule',
+                'description': 'Add an invite rule (Admin only)',
+                'actions': [
+                    {'type': 'ADD_INVITE_RULE', 'name': 'add_rule', 'parameters': {}},
+                ]
+            },
+            {
+                'name': 'delrule',
+                'description': 'Delete an invite rule (Admin only)',
+                'actions': [
+                    {'type': 'DELETE_INVITE_RULE', 'name': 'delete_rule', 'parameters': {}},
+                ]
+            },
+            {
+                'name': 'listrules',
+                'description': 'List all invite rules for this server',
+                'actions': [
+                    {'type': 'LIST_INVITE_RULES', 'name': 'show_rules', 'parameters': {}},
+                ]
+            },
+            {
+                'name': 'setmode',
+                'description': 'Set server mode: AUTO or APPROVAL (Admin only)',
+                'actions': [
+                    {'type': 'SET_SERVER_MODE', 'name': 'change_mode', 'parameters': {}},
+                ]
+            },
+            {
+                'name': 'addfield',
+                'description': 'Add a form field for applications (Admin only)',
+                'actions': [
+                    {'type': 'ADD_FORM_FIELD', 'name': 'add_field', 'parameters': {}},
+                ]
+            },
+            {
+                'name': 'listfields',
+                'description': 'List form fields for applications',
+                'actions': [
+                    {'type': 'LIST_FORM_FIELDS', 'name': 'show_fields', 'parameters': {}},
+                ]
+            },
+            {
+                'name': 'reload',
+                'description': 'Reload bot configuration (Admin only)',
+                'actions': [
+                    {'type': 'RELOAD_CONFIG', 'name': 'reload_config', 'parameters': {}},
+                ]
+            },
         ]
         
-        for name, description, handler, admin_only in commands_data:
-            cmd, created = BotCommand.objects.get_or_create(
-                name=name,
-                defaults={
-                    'description': description,
-                    'handler_function': handler,
-                    'admin_only': admin_only
-                }
-            )
+        for guild in guilds:
+            self.stdout.write(f'\n  Guild: {guild.guild_name} ({guild.guild_id})')
             
-            if created:
-                self.stdout.write(self.style.SUCCESS(f'  ✓ Created command: {name}'))
-            else:
-                self.stdout.write(f'  - Command exists: {name}')
+            for cmd_data in commands_data:
+                # Get or create command
+                bot_cmd, created = BotCommand.objects.get_or_create(
+                    guild=guild,
+                    name=cmd_data['name'],
+                    defaults={
+                        'description': cmd_data['description'],
+                        'enabled': True
+                    }
+                )
+                
+                if created:
+                    self.stdout.write(self.style.SUCCESS(f'    ✓ Created command: {cmd_data["name"]}'))
+                else:
+                    self.stdout.write(f'    - Command exists: {cmd_data["name"]}')
+                
+                # Create actions for this command
+                for action_order, action in enumerate(cmd_data.get('actions', []), start=1):
+                    action_obj, action_created = CommandAction.objects.get_or_create(
+                        command=bot_cmd,
+                        name=action['name'],
+                        defaults={
+                            'order': action_order,
+                            'type': action['type'],
+                            'parameters': action['parameters'],
+                            'enabled': True
+                        }
+                    )
+                    
+                    if action_created:
+                        self.stdout.write(f'      ✓ Created action: {action["type"]}')
         
         self.stdout.write(self.style.SUCCESS('\n✅ Initialization complete!'))
