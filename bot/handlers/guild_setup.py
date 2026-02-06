@@ -47,29 +47,29 @@ async def setup_guild(bot, guild):
         defaults={'name': pending_role.name, 'is_deleted': False}
     )
     
-    # Create #logs channel
-    logs_channel = await get_or_create_channel(guild, "logs", bot_admin_role)
-    guild_settings.logs_channel_id = logs_channel.id
+    # Create #bounce channel (private, BotAdmin only)
+    bounce_channel = await get_or_create_channel(guild, "bounce", bot_admin_role)
+    guild_settings.logs_channel_id = bounce_channel.id  # Reuse field for bounce channel
     
     # Cache channel in DB
     await sync_to_async(DiscordChannel.objects.update_or_create)(
-        discord_id=logs_channel.id,
+        discord_id=bounce_channel.id,
         guild=guild_settings,
-        defaults={'name': logs_channel.name, 'is_deleted': False}
+        defaults={'name': bounce_channel.name, 'is_deleted': False}
     )
     
     await sync_to_async(guild_settings.save)()
     
-    # Send welcome message to logs
+    # Send welcome message to bounce channel
     try:
         template = await get_template_async(guild_settings, 'INSTALL_WELCOME')
         message = template.content.format(
             bot_admin=bot_admin_role.mention,
             pending=pending_role.mention,
-            logs=logs_channel.mention,
+            logs=bounce_channel.mention,
             bot_mention=bot.user.mention
         )
-        await logs_channel.send(message)
+        await bounce_channel.send(message)
     except Exception as e:
         print(f"Failed to send welcome message: {e}")
 
@@ -155,12 +155,12 @@ async def ensure_required_resources(bot, guild_settings):
                 defaults={'name': role.name, 'is_deleted': False}
             )
     
-    # Check logs channel
+    # Check bounce channel
     if guild_settings.logs_channel_id:
         channel = guild.get_channel(guild_settings.logs_channel_id)
         if not channel:
             admin_role = guild.get_role(guild_settings.bot_admin_role_id)
-            channel = await get_or_create_channel(guild, "logs", admin_role)
+            channel = await get_or_create_channel(guild, "bounce", admin_role)
             guild_settings.logs_channel_id = channel.id
             await sync_to_async(guild_settings.save)()
             

@@ -142,12 +142,12 @@ async def handle_approval_mode(bot, member, guild_settings, invite_data):
 
 
 async def log_join(bot, member, guild_settings, invite_data, roles, mode):
-    """Log member join to logs channel"""
+    """Log member join to bounce channel"""
     
-    if not guild_settings.logs_channel_id:
+    if not guild_settings.logs_channel_id:  # bounce_channel_id
         return
     
-    channel = bot.get_channel(guild_settings.logs_channel_id)
+    channel = bot.get_channel(guild_settings.logs_channel_id)  # bounce channel
     if not channel:
         return
     
