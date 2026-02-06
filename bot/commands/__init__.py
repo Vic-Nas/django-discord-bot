@@ -20,17 +20,14 @@ class CommandRegistry:
     async def execute(self, bot, message, command_name, args, invite_cache):
         """Execute a command"""
         
-        # Check if command is in a guild (not a DM)
-        if not message.guild:
-            await message.channel.send("❌ Commands can only be used in a server, not in DMs.")
-            return
-        
-        # Get guild settings
-        try:
-            guild_settings = await sync_to_async(GuildSettings.objects.get)(guild_id=message.guild.id)
-        except GuildSettings.DoesNotExist:
-            await message.channel.send("❌ Guild not configured. Please contact bot admin.")
-            return
+        # Get guild settings (if in a guild, else None)
+        guild_settings = None
+        if message.guild:
+            try:
+                guild_settings = await sync_to_async(GuildSettings.objects.get)(guild_id=message.guild.id)
+            except GuildSettings.DoesNotExist:
+                await message.channel.send("❌ Guild not configured. Please contact bot admin.")
+                return
         
         # Check if command exists in registry
         if command_name not in self.commands:
