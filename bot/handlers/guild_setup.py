@@ -69,7 +69,12 @@ async def setup_guild(bot, guild):
         bot_mention=bot.user.mention
     )
     
-    await logs_channel.send(message)
+    try:
+        await logs_channel.send(message)
+    except discord.Forbidden:
+        print(f'⚠️ Bot lacks Send Messages permission in {logs_channel.name}')
+    except Exception as e:
+        print(f'⚠️ Could not send welcome message: {e}')
     
     print(f'✅ Setup complete for {guild.name}')
 
@@ -93,7 +98,7 @@ async def get_or_create_channel(guild, name, admin_role):
     channel = discord.utils.get(guild.text_channels, name=name)
     
     if channel:
-        # Update permissions to ensure bot can send messages
+        # Try to update permissions if bot has Manage Channels permission
         try:
             overwrites = {
                 guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -101,6 +106,9 @@ async def get_or_create_channel(guild, name, admin_role):
                 guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
             }
             await channel.edit(overwrites=overwrites)
+        except discord.Forbidden:
+            # Bot doesn't have Manage Channels permission - that's ok, continue anyway
+            pass
         except Exception as e:
             print(f'⚠️ Could not update permissions for {name}: {e}')
         return channel
