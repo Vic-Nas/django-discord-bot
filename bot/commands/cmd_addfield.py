@@ -60,7 +60,7 @@ async def cmd_addfield(bot, message, args, guild_settings, invite_cache):
     )
     
     template = await get_template_async(guild_settings, 'COMMAND_SUCCESS')
-    msg = template.content.format(
+    msg = template.format(
         message=f"Form field added: **{label}** ({field_type})"
     )
     

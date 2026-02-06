@@ -47,6 +47,12 @@ async def setup_guild(bot, guild):
         defaults={'name': pending_role.name, 'is_deleted': False}
     )
     
+    # Assign BotAdmin role to bot itself
+    try:
+        await guild.me.add_roles(bot_admin_role)
+    except Exception:
+        pass  # Might fail if bot doesn't have Manage Roles permission
+    
     # Create #bounce channel (private, BotAdmin only)
     bounce_channel = await get_or_create_channel(guild, "bounce", bot_admin_role)
     guild_settings.logs_channel_id = bounce_channel.id  # Reuse field for bounce channel
@@ -63,7 +69,7 @@ async def setup_guild(bot, guild):
     # Send welcome message to bounce channel
     try:
         template = await get_template_async(guild_settings, 'INSTALL_WELCOME')
-        message = template.content.format(
+        message = template.format(
             bot_admin=bot_admin_role.mention,
             pending=pending_role.mention,
             logs=bounce_channel.mention,
