@@ -10,8 +10,12 @@ async def setup_guild(bot, guild):
     1. Create BotAdmin role
     2. Create Pending role
     3. Create #logs channel
-    4. Send welcome message
+    4. Create all 9 default commands with actions
     5. Save to database
+    
+    NOTE: This is called automatically when bot joins (on_guild_join event).
+    If bot already exists in guild, manually run:
+      python manage.py init_defaults --guild_id YOUR_GUILD_ID
     """
     
     # Get or create guild settings

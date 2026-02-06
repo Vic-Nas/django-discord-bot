@@ -27,7 +27,18 @@ Auto-assign roles via invite links with web admin panel. Two modes: **AUTO** (in
    APP_URL=https://your-railway-app.up.railway.app
    ```
 
-5. Invite bot to Discord server, configure via web admin panel
+5. **Invite bot to Discord server**
+   - Go to Developer Portal → OAuth2 → URL Generator
+   - Permissions: `268504112`
+   - Copy URL and invite bot
+
+6. **Initialize database** (runs once):
+   ```bash
+   python manage.py init_defaults --guild_id YOUR_GUILD_ID
+   ```
+   Or kick/re-invite bot to trigger auto-init on server
+
+7. Configure via web admin panel
 
 ---
 
