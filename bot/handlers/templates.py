@@ -71,15 +71,15 @@ You may reapply in the future if server rules allow.""",
     'GETACCESS_RESPONSE': """🔑 **Admin Panel Access**
 
 Here's your access link:
-{url}
+[🔗 Access Admin Panel]({url})
 
 ⏰ **Expires:** {expires}
 
-Click the link to access the admin panel. Keep this link private!""",
+Keep this link private!""",
 
     'GETACCESS_EXISTS': """🔑 **You already have an active token!**
 
-{url}
+[🔗 Access Admin Panel]({url})
 
 ⏰ **Expires:** {expires}""",
 
