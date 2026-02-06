@@ -22,16 +22,17 @@ import discord
 from unittest.mock import AsyncMock, MagicMock
 from django.test import TestCase
 from asgiref.sync import sync_to_async
-from core.models import GuildSettings, BotCommand, InviteRule, FormField, AccessToken
+from core.models import GuildSettings, BotCommand, InviteRule, FormField, AccessToken, Application
 from bot.execution.action_executor import (
     handle_add_invite_rule,
     handle_delete_invite_rule,
     handle_list_invite_rules,
     handle_set_server_mode,
     handle_list_commands,
-    handle_add_form_field,
     handle_list_form_fields,
     handle_generate_access_token,
+    handle_approve_application,
+    handle_reject_application,
     handle_reload_config,
 )
 
@@ -156,50 +157,81 @@ class TestHandlersWithRealGuild:
         await sync_to_async(rule2.delete)()
     
     @pytest.mark.asyncio
-    async def test_add_form_field(self):
-        """Test adding form field"""
+    async def test_approve_application(self):
+        """Test approving a pending application"""
+        # Create a pending application
+        app = await sync_to_async(Application.objects.create)(
+            guild=self.guild_settings,
+            user_id=888888888888888888,
+            user_name='TestApplicant',
+            invite_code='testinvite',
+            status='PENDING',
+            responses={'1': 'Answer 1'}
+        )
+
+        # Get a real role from the guild
+        test_roles = [r for r in self.guild.roles if not r.is_bot_managed() and not r.is_default()]
+        if not test_roles:
+            pytest.skip("No roles in guild")
+
+        # Create mock targets
+        target_user = AsyncMock()
+        target_user.id = 888888888888888888
+        target_user.name = 'TestApplicant'
+        target_user.display_name = 'TestApplicant'
+        target_user.send = AsyncMock()
+
+        mock_member = AsyncMock()
+        mock_member.id = 888888888888888888
+        mock_member.roles = []
+        mock_member.add_roles = AsyncMock()
+        mock_member.remove_roles = AsyncMock()
+
+        # Use a fully mocked guild (real Guild has read-only get_member)
+        mock_guild = MagicMock()
+        mock_guild.id = self.guild.id
+        mock_guild.name = self.guild.name
+        mock_guild.roles = self.guild.roles  # Real roles for name lookup
+        mock_guild.get_member = MagicMock(return_value=mock_member)
+        mock_guild.get_role = MagicMock(side_effect=lambda rid: self.guild.get_role(rid))
+
         message = AsyncMock()
+        message.guild = mock_guild
         message.channel = AsyncMock()
-        
-        params = {}
-        args = ['TestField', 'text']
-        
-        await handle_add_form_field(self.bot, message, params, args, self.guild_settings)
-        
-        # Verify field was created
-        field = await sync_to_async(
-            lambda: FormField.objects.filter(
-                guild=self.guild_settings,
-                label='TestField'
-            ).first()
-        )()
-        
-        assert field is not None
-        
+        message.author = AsyncMock()
+        message.author.id = 999999999999999999
+        message.author.name = 'TestAdmin'
+        message.mentions = [target_user]
+
+        args = [f'<@{target_user.id}>', test_roles[0].name]
+
+        await handle_approve_application(self.bot, message, {}, args, self.guild_settings)
+
+        # Verify application was approved
+        updated_app = await sync_to_async(Application.objects.get)(id=app.id)
+        assert updated_app.status == 'APPROVED' or updated_app.status == 'approved'
+        assert message.channel.send.called
+
         # Cleanup
-        await sync_to_async(field.delete)()
+        await sync_to_async(updated_app.delete)()
     
     @pytest.mark.asyncio
-    async def test_generate_access_token(self):
-        """Test token generation"""
+    async def test_generate_access_token_dm_only(self):
+        """Test token generation is DM-only (rejects server context)"""
+        # Server context should be rejected
         message = AsyncMock()
+        message.guild = self.guild  # Server context
         message.channel = AsyncMock()
         message.author = AsyncMock()
         message.author.id = 111111111111111111
         message.author.name = 'TestUser'
-        message.author.mention = '<@111111111111111111>'
-        
+
         await handle_generate_access_token(self.bot, message, {}, self.guild_settings)
-        
-        # Verify token was created
-        token = await sync_to_async(
-            lambda: AccessToken.objects.filter(guild=self.guild_settings).last()
-        )()
-        
-        assert token is not None
-        
-        # Cleanup
-        await sync_to_async(token.delete)()
+
+        # Should tell user to go to DMs
+        message.channel.send.assert_called_once()
+        call_args = message.channel.send.call_args[0][0]
+        assert 'DM' in call_args or 'direct message' in call_args.lower()
     
     @pytest.mark.asyncio
     async def test_set_server_mode(self):
@@ -314,8 +346,11 @@ class TestCommandDatabase:
         )
         yield
     
-    def test_all_9_commands_configured(self):
-        """Verify all 9 commands exist with correct actions"""
+    def test_all_10_commands_configured(self):
+        """Verify all 10 commands can be created with correct actions via init_defaults"""
+        from django.core.management import call_command
+        from io import StringIO
+
         expected = {
             'help': 'LIST_COMMANDS',
             'listrules': 'LIST_INVITE_RULES',
@@ -323,12 +358,12 @@ class TestCommandDatabase:
             'delrule': 'DELETE_INVITE_RULE',
             'setmode': 'SET_SERVER_MODE',
             'getaccess': 'GENERATE_ACCESS_TOKEN',
-            'addfield': 'ADD_FORM_FIELD',
+            'approve': 'APPROVE_APPLICATION',
+            'reject': 'REJECT_APPLICATION',
             'listfields': 'LIST_FORM_FIELDS',
             'reload': 'RELOAD_CONFIG',
         }
         
-        # Get test guild
         test_guild_id = int(os.getenv('TEST_GUILD_ID', '0'))
         if test_guild_id == 0:
             pytest.skip("TEST_GUILD_ID not set")
@@ -337,6 +372,9 @@ class TestCommandDatabase:
             guild_settings = GuildSettings.objects.get(guild_id=test_guild_id)
         except GuildSettings.DoesNotExist:
             pytest.skip(f"Guild {test_guild_id} not in database")
+        
+        # Run init_defaults to create commands
+        call_command('init_defaults', guild_id=test_guild_id, stdout=StringIO())
         
         # Verify each command
         for cmd_name, expected_type in expected.items():

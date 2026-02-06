@@ -63,7 +63,7 @@ async def setup_guild(bot, guild):
     
     # Create #bounce channel (private, BotAdmin only)
     bounce_channel = await get_or_create_channel(guild, "bounce", bot_admin_role)
-    guild_settings.logs_channel_id = bounce_channel.id  # Reuse field for bounce channel
+    guild_settings.logs_channel_id = bounce_channel.id
     
     # Cache channel in DB
     await sync_to_async(DiscordChannel.objects.update_or_create)(
@@ -71,6 +71,19 @@ async def setup_guild(bot, guild):
         guild=guild_settings,
         defaults={}
     )
+    
+    # Create #pending channel (visible ONLY to Pending role + bot)
+    pending_channel = await get_or_create_pending_channel(guild, pending_role)
+    guild_settings.pending_channel_id = pending_channel.id
+    
+    await sync_to_async(DiscordChannel.objects.update_or_create)(
+        discord_id=pending_channel.id,
+        guild=guild_settings,
+        defaults={}
+    )
+    
+    # Restrict Pending role from seeing all other channels
+    await restrict_pending_role(guild, pending_role)
     
     await sync_to_async(guild_settings.save)()
     
@@ -119,13 +132,6 @@ async def setup_guild(bot, guild):
             ]
         },
         {
-            'name': 'addfield',
-            'description': 'Add a form field for applications (Admin only)',
-            'actions': [
-                {'type': 'ADD_FORM_FIELD', 'name': 'add_field', 'parameters': {}},
-            ]
-        },
-        {
             'name': 'listfields',
             'description': 'List form fields for applications',
             'actions': [
@@ -137,6 +143,20 @@ async def setup_guild(bot, guild):
             'description': 'Reload bot configuration (Admin only)',
             'actions': [
                 {'type': 'RELOAD_CONFIG', 'name': 'reload_config', 'parameters': {}},
+            ]
+        },
+        {
+            'name': 'approve',
+            'description': 'Approve a pending member (Admin only)',
+            'actions': [
+                {'type': 'APPROVE_APPLICATION', 'name': 'approve_member', 'parameters': {}},
+            ]
+        },
+        {
+            'name': 'reject',
+            'description': 'Reject a pending member (Admin only)',
+            'actions': [
+                {'type': 'REJECT_APPLICATION', 'name': 'reject_member', 'parameters': {}},
             ]
         },
     ]
@@ -211,6 +231,45 @@ async def setup_guild(bot, guild):
             await bounce_channel.send(message)
     except Exception as e:
         print(f"Failed to send welcome message: {e}")
+
+
+async def get_or_create_pending_channel(guild, pending_role):
+    """Create #pending channel visible ONLY to Pending role and bot"""
+    channel = discord.utils.get(guild.text_channels, name='pending')
+    
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(read_messages=False),
+        pending_role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+        guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+    }
+    
+    if channel:
+        try:
+            await channel.edit(overwrites=overwrites)
+        except Exception:
+            pass
+        return channel
+    
+    try:
+        channel = await guild.create_text_channel('pending', overwrites=overwrites)
+    except Exception:
+        channel = await guild.create_text_channel('pending')
+    
+    return channel
+
+
+async def restrict_pending_role(guild, pending_role):
+    """Prevent Pending role from seeing all channels except #pending"""
+    for channel in guild.text_channels:
+        if channel.name == 'pending':
+            continue  # Skip #pending channel
+        try:
+            await channel.set_permissions(
+                pending_role,
+                read_messages=False
+            )
+        except Exception:
+            pass  # Skip channels we can't modify
 
 
 async def get_or_create_role(guild, name, **kwargs):
@@ -328,3 +387,19 @@ async def ensure_required_resources(bot, guild_settings):
                 guild=guild_settings,
                 defaults={}
             )
+    
+    # Check pending channel
+    if guild_settings.pending_channel_id:
+        channel = guild.get_channel(guild_settings.pending_channel_id)
+        if not channel:
+            pending_role = guild.get_role(guild_settings.pending_role_id)
+            if pending_role:
+                channel = await get_or_create_pending_channel(guild, pending_role)
+                guild_settings.pending_channel_id = channel.id
+                await sync_to_async(guild_settings.save)()
+                
+                await sync_to_async(DiscordChannel.objects.update_or_create)(
+                    discord_id=channel.id,
+                    guild=guild_settings,
+                    defaults={}
+                )

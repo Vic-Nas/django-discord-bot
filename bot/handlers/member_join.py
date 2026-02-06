@@ -1,3 +1,4 @@
+import os
 import discord
 from core.models import GuildSettings, InviteRule, Application
 from .templates import get_template_async
@@ -120,7 +121,8 @@ async def handle_auto_mode(bot, member, guild_settings, invite_data):
 
 async def handle_approval_mode(bot, member, guild_settings, invite_data):
     """
-    APPROVAL mode: Assign Pending role, collect application.
+    APPROVAL mode: Assign Pending role, send form link in #pending channel.
+    The user fills the form on the web. When submitted, the bot posts to #approvals.
     """
     
     # Ensure required resources exist
@@ -137,8 +139,8 @@ async def handle_approval_mode(bot, member, guild_settings, invite_data):
     # Log the join
     await log_join(bot, member, guild_settings, invite_data, ['Pending'], 'APPROVAL')
     
-    # Send application form to user
-    await send_application_form(bot, member, guild_settings, invite_data)
+    # Send form link in #pending channel
+    await send_form_link(bot, member, guild_settings, invite_data)
 
 
 async def log_join(bot, member, guild_settings, invite_data, roles, mode):
@@ -171,82 +173,59 @@ async def log_join(bot, member, guild_settings, invite_data, roles, mode):
     await channel.send(embed=embed)
 
 
-async def send_application_form(bot, member, guild_settings, invite_data):
-    """Send application form to user via DM"""
-    
-    # Get form fields
+async def send_form_link(bot, member, guild_settings, invite_data):
+    """Send form link in the #pending channel so the new member can fill it out."""
     from core.models import FormField
-    fields = await sync_to_async(lambda: list(FormField.objects.filter(guild=guild_settings).order_by('order')))()
-    
-    if not fields:
-        # No form configured, just notify user
-        template = await get_template_async(guild_settings, 'APPLICATION_SENT')
-        message = template.format(server=member.guild.name)
-        
-        try:
-            await member.send(message)
-        except:
-            print(f'❌ Could not DM {member.name}')
+
+    # Get form fields to check if any exist
+    fields = await sync_to_async(
+        lambda: list(FormField.objects.filter(guild=guild_settings).order_by('order'))
+    )()
+
+    # Build form URL
+    app_url = os.environ.get('APP_URL', 'https://your-domain.com')
+    form_url = f"{app_url}/form/{guild_settings.guild_id}?user={member.id}&invite={invite_data['code']}"
+
+    # Send in #pending channel
+    pending_channel = bot.get_channel(guild_settings.pending_channel_id) if guild_settings.pending_channel_id else None
+    if not pending_channel:
+        # Fallback: try to find a channel named 'pending'
+        pending_channel = discord.utils.get(member.guild.text_channels, name='pending')
+
+    if not pending_channel:
+        print(f'⚠️ No #pending channel found for {member.guild.name}')
         return
-    
-    # Send form questions one by one
-    try:
-        await member.send(f"📋 **Application for {member.guild.name}**\n\nPlease answer the following questions:")
-        
-        responses = {}
-        
-        for field in fields:
-            # Ask question
-            question = f"**{field.label}**"
-            if field.required:
-                question += " (required)"
-            
-            if field.field_type in ['select', 'radio', 'checkbox'] and field.options:
-                question += "\nOptions: " + ", ".join(field.options)
-            
-            await member.send(question)
-            
-            # Wait for response
-            def check(m):
-                return m.author == member and isinstance(m.channel, discord.DMChannel)
-            
-            try:
-                response = await bot.wait_for('message', check=check, timeout=300)  # 5 min timeout
-                responses[field.id] = response.content
-            except:
-                if field.required:
-                    await member.send("❌ Application timed out. Please try again.")
-                    return
-                responses[field.id] = ""
-        
-        # Save application
-        inviter_id = invite_data['inviter'].id if invite_data['inviter'] else None
-        inviter_name = invite_data['inviter'].name if invite_data['inviter'] else 'Unknown'
-        
-        application = await sync_to_async(Application.objects.create)(
-            guild=guild_settings,
-            user_id=member.id,
-            user_name=str(member),
-            invite_code=invite_data['code'],
-            inviter_id=inviter_id,
-            inviter_name=inviter_name,
-            responses=responses
+
+    if not fields:
+        await pending_channel.send(
+            f"👋 Welcome {member.mention}! No application form is configured yet. "
+            f"Please wait for an admin to review your join request."
         )
-        
-        # Confirm to user
-        template = await get_template_async(guild_settings, 'APPLICATION_SENT')
-        message = template.format(server=member.guild.name)
-        await member.send(message)
-        
-        # Post to approvals channel
-        await post_application_for_review(bot, guild_settings, member, application, invite_data)
-        
-    except Exception as e:
-        print(f'❌ Error sending application form: {e}')
-        try:
-            await member.send("❌ Sorry, there was an error with the application form. Please contact an admin.")
-        except:
-            pass
+        return
+
+    # Save a preliminary application record so we can track the invite
+    inviter_id = invite_data['inviter'].id if invite_data['inviter'] else None
+    inviter_name = invite_data['inviter'].name if invite_data['inviter'] else 'Unknown'
+
+    await sync_to_async(Application.objects.create)(
+        guild=guild_settings,
+        user_id=member.id,
+        user_name=str(member),
+        invite_code=invite_data['code'],
+        inviter_id=inviter_id,
+        inviter_name=inviter_name,
+        status='PENDING',
+        responses={}
+    )
+
+    field_list = '\n'.join([f"• {f.label}" for f in fields])
+    await pending_channel.send(
+        f"👋 Welcome {member.mention}!\n\n"
+        f"To complete your application for **{member.guild.name}**, please fill out the form:\n"
+        f"🔗 **{form_url}**\n\n"
+        f"The form will ask you about:\n{field_list}\n\n"
+        f"Once submitted, an admin will review your application."
+    )
 
 
 async def post_application_for_review(bot, guild_settings, member, application, invite_data):
@@ -268,24 +247,36 @@ async def post_application_for_review(bot, guild_settings, member, application, 
         answer = application.responses.get(str(field.id), "No answer")
         responses_text += f"**{field.label}:** {answer}\n"
     
-    template = await get_template_async(guild_settings, 'APPROVAL_NOTIFICATION')
-    inviter_name = invite_data['inviter'].name if invite_data['inviter'] else 'Unknown'
+    inviter_name = invite_data.get('inviter_name') if isinstance(invite_data, dict) else 'Unknown'
+    if not inviter_name:
+        inviter_name = invite_data.get('inviter', {})
+        if hasattr(inviter_name, 'name'):
+            inviter_name = inviter_name.name
+        else:
+            inviter_name = 'Unknown'
     
-    message = template.format(
-        user=member.mention,
-        invite_code=invite_data['code'],
-        inviter=inviter_name,
-        responses=responses_text
-    )
+    invite_code = invite_data.get('code', 'unknown') if isinstance(invite_data, dict) else 'unknown'
     
     embed = discord.Embed(
-        title=f"Application #{application.id}",
-        description=message,
+        title=f"📋 Application #{application.id} — {application.user_name}",
         color=discord.Color.orange()
+    )
+    embed.add_field(name="User", value=f"<@{application.user_id}>", inline=True)
+    embed.add_field(name="Invite", value=invite_code, inline=True)
+    embed.add_field(name="Invited by", value=inviter_name, inline=True)
+    
+    if responses_text:
+        embed.add_field(name="Responses", value=responses_text, inline=False)
+    
+    embed.add_field(
+        name="Actions",
+        value=(
+            f"✅ `@Bot approve <@{application.user_id}> role1,role2`\n"
+            f"❌ `@Bot reject <@{application.user_id}> [reason]`"
+        ),
+        inline=False
     )
     
     msg = await channel.send(embed=embed)
-    
-    # Add reactions for approve/reject
     await msg.add_reaction('✅')
     await msg.add_reaction('❌')

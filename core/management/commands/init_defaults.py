@@ -94,10 +94,17 @@ class Command(BaseCommand):
                 ]
             },
             {
-                'name': 'addfield',
-                'description': 'Add a form field for applications (Admin only)',
+                'name': 'approve',
+                'description': 'Approve a pending user application (Admin only)',
                 'actions': [
-                    {'type': 'ADD_FORM_FIELD', 'name': 'add_field', 'parameters': {}},
+                    {'type': 'APPROVE_APPLICATION', 'name': 'approve_user', 'parameters': {}},
+                ]
+            },
+            {
+                'name': 'reject',
+                'description': 'Reject a pending user application (Admin only)',
+                'actions': [
+                    {'type': 'REJECT_APPLICATION', 'name': 'reject_user', 'parameters': {}},
                 ]
             },
             {

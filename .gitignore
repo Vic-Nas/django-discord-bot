@@ -23,6 +23,7 @@ ENV/
 
 # IDE
 .vscode/
+.copilot_context.md
 .history/
 .idea/
 *.swp

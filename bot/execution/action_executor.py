@@ -123,8 +123,11 @@ async def execute_single_action(bot, message, action_obj, guild_settings, args=N
     elif action_type == 'GENERATE_ACCESS_TOKEN':
         await handle_generate_access_token(bot, message, params, guild_settings)
     
-    elif action_type == 'ADD_FORM_FIELD':
-        await handle_add_form_field(bot, message, params, args, guild_settings)
+    elif action_type == 'APPROVE_APPLICATION':
+        await handle_approve_application(bot, message, params, args, guild_settings)
+    
+    elif action_type == 'REJECT_APPLICATION':
+        await handle_reject_application(bot, message, params, args, guild_settings)
     
     elif action_type == 'LIST_FORM_FIELDS':
         await handle_list_form_fields(bot, message, params, guild_settings)
@@ -493,85 +496,224 @@ async def handle_list_commands(bot, message, params, guild_settings):
 
 
 async def handle_generate_access_token(bot, message, params, guild_settings):
-    """GENERATE_ACCESS_TOKEN: Create web panel access token"""
-    from core.models import AccessToken
+    """GENERATE_ACCESS_TOKEN: DM-only. Find guilds where user is BotAdmin, let them pick, generate token."""
+    from core.models import AccessToken, GuildSettings
     from bot.handlers.templates import get_template_async
-    
-    # Check if user already has a token
+    import os
+
+    # Must be used in DM only
+    if message.guild is not None:
+        await message.channel.send("⚠️ This command only works in DMs. Please send me a direct message!")
+        return
+
+    # Find all guilds where this user has the BotAdmin role
+    all_guild_settings = await sync_to_async(
+        lambda: list(GuildSettings.objects.filter(bot_admin_role_id__isnull=False))
+    )()
+
+    admin_guilds = []
+    for gs in all_guild_settings:
+        guild = bot.get_guild(gs.guild_id)
+        if guild is None:
+            continue
+        member = guild.get_member(message.author.id)
+        if member is None:
+            continue
+        # Check if member has the BotAdmin role
+        if any(r.id == gs.bot_admin_role_id for r in member.roles):
+            admin_guilds.append((guild, gs))
+
+    if not admin_guilds:
+        await message.author.send("⚠️ You are not a BotAdmin in any server I'm in.")
+        return
+
+    if len(admin_guilds) == 1:
+        # Only one guild, use it directly
+        selected_guild, selected_gs = admin_guilds[0]
+    else:
+        # Multiple guilds — ask user to pick
+        guild_list = '\n'.join([f"**{i+1}.** {g.name}" for i, (g, _) in enumerate(admin_guilds)])
+        await message.author.send(f"You are a BotAdmin in multiple servers. Reply with the number:\n{guild_list}")
+
+        def check(m):
+            return m.author.id == message.author.id and m.guild is None and m.content.isdigit()
+
+        try:
+            reply = await bot.wait_for('message', check=check, timeout=30.0)
+            choice = int(reply.content)
+            if choice < 1 or choice > len(admin_guilds):
+                await message.author.send("❌ Invalid choice.")
+                return
+            selected_guild, selected_gs = admin_guilds[choice - 1]
+        except Exception:
+            await message.author.send("⏰ Timed out. Please try again.")
+            return
+
+    # Check for existing token
     existing = await sync_to_async(
         lambda: AccessToken.objects.filter(
             user_id=message.author.id,
-            guild=guild_settings,
+            guild=selected_gs,
             expires_at__gt=timezone.now()
         ).first()
     )()
-    
+
+    app_url = os.environ.get('APP_URL', 'https://your-domain.com')
+
     if existing:
         expires_str = existing.expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')
-        access_url = f"`https://[your-domain]/access/{existing.token}`"
-        template = await get_template_async(guild_settings, 'GETACCESS_EXISTS')
-        try:
-            msg = template.format(url=access_url, expires=expires_str, user=message.author.mention)
-        except KeyError:
-            msg = template.format(url=access_url, expires=expires_str)
-        await message.channel.send(msg)
+        access_url = f"{app_url}/access/{existing.token}"
+        await message.author.send(
+            f"🔑 You already have an active token for **{selected_guild.name}**:\n"
+            f"{access_url}\n"
+            f"Expires: {expires_str}"
+        )
         return
-    
+
     # Create new token
     token = secrets.token_urlsafe(32)
     expires_at = timezone.now() + timedelta(hours=24)
-    
+
     await sync_to_async(AccessToken.objects.create)(
         token=token,
         user_id=message.author.id,
         user_name=message.author.name,
-        guild=guild_settings,
+        guild=selected_gs,
         expires_at=expires_at
     )
-    
-    # Send response with token (in channel, not DM)
+
     expires_str = expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')
-    access_url = f"`https://[your-domain]/access/{token}`"
-    template = await get_template_async(guild_settings, 'GETACCESS_RESPONSE')
-    try:
-        msg = template.format(url=access_url, expires=expires_str)
-    except KeyError:
-        msg = template.format(url=access_url, expires=expires_str)
-    await message.channel.send(msg)
-
-
-async def handle_add_form_field(bot, message, params, args, guild_settings):
-    """ADD_FORM_FIELD: Add a field to the application form"""
-    from core.models import FormField
-    from bot.handlers.templates import get_template_async
-    
-    if len(args) < 2:
-        raise ExecutionError("Usage: `@Bot addfield <label> <type> [required]`")
-    
-    label = args[0]
-    field_type = args[1].lower()
-    required = True if len(args) < 3 or args[2].lower() != 'false' else False
-    
-    valid_types = ['text', 'textarea', 'select', 'radio', 'checkbox', 'file']
-    if field_type not in valid_types:
-        raise ExecutionError(f"Type must be one of: {', '.join(valid_types)}")
-    
-    # Get max order
-    max_order = await sync_to_async(
-        lambda: FormField.objects.filter(guild=guild_settings).aggregate(max_order=Max('order'))['max_order'] or 0
-    )()
-    
-    await sync_to_async(FormField.objects.create)(
-        guild=guild_settings,
-        label=label,
-        field_type=field_type,
-        required=required,
-        order=max_order + 1
+    access_url = f"{app_url}/access/{token}"
+    await message.author.send(
+        f"🔑 Access token for **{selected_guild.name}**:\n"
+        f"{access_url}\n"
+        f"Expires: {expires_str}"
     )
-    
-    template = await get_template_async(guild_settings, 'COMMAND_SUCCESS')
-    msg = template.format(message=f"Added form field: **{label}** ({field_type})")
-    await message.channel.send(msg)
+
+
+async def handle_approve_application(bot, message, params, args, guild_settings):
+    """APPROVE_APPLICATION: Approve a user and assign roles. Usage: @Bot approve @user role1,role2"""
+    from core.models import Application, DiscordRole
+    from bot.handlers.templates import get_template_async
+
+    if not message.guild:
+        raise ExecutionError("This command can only be used in a server.")
+
+    if len(args) < 1:
+        raise ExecutionError("Usage: `@Bot approve @user [role1,role2,...]`")
+
+    # Parse mentioned user
+    if not message.mentions:
+        raise ExecutionError("Please mention the user to approve: `@Bot approve @user [role1,role2]`")
+
+    target_user = message.mentions[0]
+    member = message.guild.get_member(target_user.id)
+    if not member:
+        raise ExecutionError(f"User {target_user.name} is not in this server.")
+
+    # Parse roles from args (second arg onwards, comma-separated)
+    role_names = []
+    if len(args) >= 2:
+        role_names = [r.strip() for r in ' '.join(args[1:]).split(',') if r.strip()]
+
+    # Find the pending application
+    application = await sync_to_async(
+        lambda: Application.objects.filter(
+            guild=guild_settings,
+            user_id=target_user.id,
+            status='PENDING'
+        ).order_by('-created_at').first()
+    )()
+
+    # Remove Pending role
+    if guild_settings.pending_role_id:
+        pending_role = message.guild.get_role(guild_settings.pending_role_id)
+        if pending_role and pending_role in member.roles:
+            await member.remove_roles(pending_role)
+
+    # Assign requested roles
+    assigned_roles = []
+    for rname in role_names:
+        role = discord.utils.get(message.guild.roles, name=rname)
+        if role:
+            await member.add_roles(role)
+            assigned_roles.append(role.name)
+
+    # Update application status
+    if application:
+        application.status = 'APPROVED'
+        application.reviewed_by = message.author.id
+        application.reviewed_at = timezone.now()
+        await sync_to_async(application.save)()
+
+    # Notify the user
+    try:
+        roles_str = ', '.join(assigned_roles) if assigned_roles else 'no specific roles'
+        await target_user.send(
+            f"✅ Your application in **{message.guild.name}** has been approved! "
+            f"Roles assigned: {roles_str}"
+        )
+    except discord.Forbidden:
+        pass  # Can't DM user
+
+    roles_str = ', '.join(assigned_roles) if assigned_roles else 'none'
+    await message.channel.send(
+        f"✅ Approved **{target_user.display_name}**. Roles assigned: {roles_str}"
+    )
+
+
+async def handle_reject_application(bot, message, params, args, guild_settings):
+    """REJECT_APPLICATION: Reject a user's application. Usage: @Bot reject @user [reason]"""
+    from core.models import Application
+
+    if not message.guild:
+        raise ExecutionError("This command can only be used in a server.")
+
+    if len(args) < 1:
+        raise ExecutionError("Usage: `@Bot reject @user [reason]`")
+
+    if not message.mentions:
+        raise ExecutionError("Please mention the user to reject: `@Bot reject @user [reason]`")
+
+    target_user = message.mentions[0]
+    member = message.guild.get_member(target_user.id)
+
+    reason = ' '.join(args[1:]) if len(args) > 1 else 'No reason provided'
+
+    # Update application status
+    application = await sync_to_async(
+        lambda: Application.objects.filter(
+            guild=guild_settings,
+            user_id=target_user.id,
+            status='PENDING'
+        ).order_by('-created_at').first()
+    )()
+
+    if application:
+        application.status = 'REJECTED'
+        application.reviewed_by = message.author.id
+        application.reviewed_at = timezone.now()
+        await sync_to_async(application.save)()
+
+    # Notify the user
+    try:
+        await target_user.send(
+            f"❌ Your application in **{message.guild.name}** has been rejected.\n"
+            f"Reason: {reason}"
+        )
+    except discord.Forbidden:
+        pass
+
+    # Optionally kick the user
+    if member and params.get('kick_on_reject', False):
+        try:
+            await member.kick(reason=f"Application rejected: {reason}")
+        except discord.Forbidden:
+            pass
+
+    await message.channel.send(
+        f"❌ Rejected **{target_user.display_name}**. Reason: {reason}"
+    )
 
 
 async def handle_list_form_fields(bot, message, params, guild_settings):

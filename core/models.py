@@ -19,6 +19,7 @@ class GuildSettings(models.Model):
     # Channels (stored by ID, auto-created if missing)
     logs_channel_id = models.BigIntegerField(null=True, blank=True)
     approvals_channel_id = models.BigIntegerField(null=True, blank=True)
+    pending_channel_id = models.BigIntegerField(null=True, blank=True)
     
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
@@ -169,9 +170,10 @@ class CommandAction(models.Model):
         ('SET_SERVER_MODE', 'Set Server Mode'),
         ('LIST_COMMANDS', 'List Commands'),
         ('GENERATE_ACCESS_TOKEN', 'Generate Access Token'),
-        ('ADD_FORM_FIELD', 'Add Form Field'),
         ('LIST_FORM_FIELDS', 'List Form Fields'),
         ('RELOAD_CONFIG', 'Reload Configuration'),
+        ('APPROVE_APPLICATION', 'Approve Application'),
+        ('REJECT_APPLICATION', 'Reject Application'),
     ]
     
     command = models.ForeignKey(BotCommand, on_delete=models.CASCADE, related_name='actions')
