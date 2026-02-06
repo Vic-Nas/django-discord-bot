@@ -6,7 +6,12 @@ from django.views.static import serve
 from core import views
 
 def favicon(request):
-    """Serve favicon.png directly without relying on static files"""
+    """Serve favicon.png directly from project/static"""
+    import os
+    favicon_path = os.path.join(settings.BASE_DIR, 'project', 'static', 'favicon.png')
+    if os.path.exists(favicon_path):
+        return serve(request, 'favicon.png', document_root=os.path.join(settings.BASE_DIR, 'project', 'static'))
+    # Fallback to collected static files
     return serve(request, 'favicon.png', document_root=settings.STATIC_ROOT)
 
 urlpatterns = [
