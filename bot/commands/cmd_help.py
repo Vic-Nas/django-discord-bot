@@ -1,5 +1,5 @@
 import discord
-from handlers.templates import get_template
+from handlers.templates import get_template_async
 
 
 async def cmd_help(bot, message, args, guild_settings, invite_cache):
@@ -24,7 +24,7 @@ async def cmd_help(bot, message, args, guild_settings, invite_cache):
     
     commands_text = "\n".join(cmd_list)
     
-    template = get_template(guild_settings, 'HELP_MESSAGE')
+    template = await get_template_async(guild_settings, 'HELP_MESSAGE')
     message_text = template.format(
         commands=commands_text,
         bot_mention=bot.user.mention
