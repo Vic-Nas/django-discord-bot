@@ -63,7 +63,7 @@ class CommandRegistry:
         print(f"📤 Executing command '{command_name}' on server {message.guild.name}")
         
         try:
-            results = await execute_command_actions(bot, message, bot_cmd)
+            results = await execute_command_actions(bot, message, bot_cmd, args)
             
             # Log results
             for success, status_msg in results:

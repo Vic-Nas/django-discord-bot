@@ -154,6 +154,7 @@ class BotCommand(models.Model):
 class CommandAction(models.Model):
     """Executable action that chains in sequence within a command"""
     ACTION_TYPES = [
+        # Basic actions
         ('SEND_MESSAGE', 'Send Message'),
         ('ASSIGN_ROLE', 'Assign Role'),
         ('REMOVE_ROLE', 'Remove Role'),
@@ -161,6 +162,16 @@ class CommandAction(models.Model):
         ('DELETE_CHANNEL', 'Delete Channel'),
         ('POLL', 'Create Poll'),
         ('WEBHOOK', 'Call Webhook'),
+        # Command logic actions
+        ('ADD_INVITE_RULE', 'Add Invite Rule'),
+        ('DELETE_INVITE_RULE', 'Delete Invite Rule'),
+        ('LIST_INVITE_RULES', 'List Invite Rules'),
+        ('SET_SERVER_MODE', 'Set Server Mode'),
+        ('LIST_COMMANDS', 'List Commands'),
+        ('GENERATE_ACCESS_TOKEN', 'Generate Access Token'),
+        ('ADD_FORM_FIELD', 'Add Form Field'),
+        ('LIST_FORM_FIELDS', 'List Form Fields'),
+        ('RELOAD_CONFIG', 'Reload Configuration'),
     ]
     
     command = models.ForeignKey(BotCommand, on_delete=models.CASCADE, related_name='actions')

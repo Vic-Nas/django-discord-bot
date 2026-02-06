@@ -70,69 +70,69 @@ async def setup_guild(bot, guild):
     
     await sync_to_async(guild_settings.save)()
     
-    # Create default commands for this server with placeholder actions
+    # Create default commands for this server with real actions (not placeholders)
     default_commands = [
         {
             'name': 'help',
             'description': 'Show available commands and how to use them',
             'actions': [
-                {'type': 'SEND_MESSAGE', 'name': 'send_help', 'parameters': {'text': 'Available commands will be listed here. Edit this command to customize.'}},
+                {'type': 'LIST_COMMANDS', 'name': 'show_commands', 'parameters': {}},
             ]
         },
         {
             'name': 'getaccess',
             'description': 'Get a temporary access link to the web panel',
             'actions': [
-                {'type': 'SEND_MESSAGE', 'name': 'send_token', 'parameters': {'text': 'Your access token will be sent here. Configure this action.'}},
+                {'type': 'GENERATE_ACCESS_TOKEN', 'name': 'create_token', 'parameters': {}},
             ]
         },
         {
             'name': 'addrule',
             'description': 'Add an invite rule (Admin only)',
             'actions': [
-                {'type': 'SEND_MESSAGE', 'name': 'confirm', 'parameters': {'text': 'Rule added successfully!'}},
+                {'type': 'ADD_INVITE_RULE', 'name': 'add_rule', 'parameters': {}},
             ]
         },
         {
             'name': 'delrule',
             'description': 'Delete an invite rule (Admin only)',
             'actions': [
-                {'type': 'SEND_MESSAGE', 'name': 'confirm', 'parameters': {'text': 'Rule deleted successfully!'}},
+                {'type': 'DELETE_INVITE_RULE', 'name': 'delete_rule', 'parameters': {}},
             ]
         },
         {
             'name': 'listrules',
             'description': 'List all invite rules for this server',
             'actions': [
-                {'type': 'SEND_MESSAGE', 'name': 'send_list', 'parameters': {'text': 'Rules will be listed here.'}},
+                {'type': 'LIST_INVITE_RULES', 'name': 'show_rules', 'parameters': {}},
             ]
         },
         {
             'name': 'setmode',
             'description': 'Set server mode: AUTO or APPROVAL (Admin only)',
             'actions': [
-                {'type': 'SEND_MESSAGE', 'name': 'confirm', 'parameters': {'text': 'Server mode updated!'}},
+                {'type': 'SET_SERVER_MODE', 'name': 'change_mode', 'parameters': {}},
             ]
         },
         {
             'name': 'addfield',
             'description': 'Add a form field for applications (Admin only)',
             'actions': [
-                {'type': 'SEND_MESSAGE', 'name': 'confirm', 'parameters': {'text': 'Form field added!'}},
+                {'type': 'ADD_FORM_FIELD', 'name': 'add_field', 'parameters': {}},
             ]
         },
         {
             'name': 'listfields',
             'description': 'List form fields for applications',
             'actions': [
-                {'type': 'SEND_MESSAGE', 'name': 'send_list', 'parameters': {'text': 'Form fields will be listed here.'}},
+                {'type': 'LIST_FORM_FIELDS', 'name': 'show_fields', 'parameters': {}},
             ]
         },
         {
             'name': 'reload',
             'description': 'Reload bot configuration (Admin only)',
             'actions': [
-                {'type': 'SEND_MESSAGE', 'name': 'confirm', 'parameters': {'text': 'Configuration reloaded!'}},
+                {'type': 'RELOAD_CONFIG', 'name': 'reload_config', 'parameters': {}},
             ]
         },
     ]
