@@ -37,29 +37,26 @@ class DiscordRole(models.Model):
     discord_id = models.BigIntegerField()
     guild = models.ForeignKey(GuildSettings, on_delete=models.CASCADE, related_name='roles')
     name = models.CharField(max_length=100)
-    is_deleted = models.BooleanField(default=False)  # Marked when role no longer exists
     
     class Meta:
         db_table = 'discord_roles'
         unique_together = ['guild', 'discord_id']
     
     def __str__(self):
-        return f"{self.name} ({'DELETED' if self.is_deleted else 'Active'})"
+        return self.name
 
 
 class DiscordChannel(models.Model):
     """Cached Discord channels"""
     discord_id = models.BigIntegerField()
     guild = models.ForeignKey(GuildSettings, on_delete=models.CASCADE, related_name='channels')
-    name = models.CharField(max_length=100)
-    is_deleted = models.BooleanField(default=False)
     
     class Meta:
         db_table = 'discord_channels'
         unique_together = ['guild', 'discord_id']
     
     def __str__(self):
-        return f"#{self.name} ({'DELETED' if self.is_deleted else 'Active'})"
+        return f"Channel {self.discord_id}"
 
 
 class InviteRule(models.Model):

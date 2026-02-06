@@ -36,7 +36,7 @@ async def cmd_setmode(bot, message, args, guild_settings, invite_cache):
             await sync_to_async(DiscordChannel.objects.update_or_create)(
                 discord_id=approvals_channel.id,
                 guild=guild_settings,
-                defaults={'name': approvals_channel.name, 'is_deleted': False}
+                defaults={}
             )
     
     await sync_to_async(guild_settings.save)()

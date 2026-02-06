@@ -33,7 +33,7 @@ async def setup_guild(bot, guild):
     await sync_to_async(DiscordRole.objects.update_or_create)(
         discord_id=bot_admin_role.id,
         guild=guild_settings,
-        defaults={'name': bot_admin_role.name, 'is_deleted': False}
+        defaults={'name': bot_admin_role.name}
     )
     
     # Create Pending role
@@ -44,7 +44,7 @@ async def setup_guild(bot, guild):
     await sync_to_async(DiscordRole.objects.update_or_create)(
         discord_id=pending_role.id,
         guild=guild_settings,
-        defaults={'name': pending_role.name, 'is_deleted': False}
+        defaults={'name': pending_role.name}
     )
     
     # Assign BotAdmin role to bot itself
@@ -65,7 +65,7 @@ async def setup_guild(bot, guild):
     await sync_to_async(DiscordChannel.objects.update_or_create)(
         discord_id=bounce_channel.id,
         guild=guild_settings,
-        defaults={'name': bounce_channel.name, 'is_deleted': False}
+        defaults={}
     )
     
     await sync_to_async(guild_settings.save)()
@@ -191,7 +191,7 @@ async def ensure_required_resources(bot, guild_settings):
             await sync_to_async(DiscordRole.objects.update_or_create)(
                 discord_id=role.id,
                 guild=guild_settings,
-                defaults={'name': role.name, 'is_deleted': False}
+                defaults={'name': role.name}
             )
     
     # Check Pending role
@@ -205,7 +205,7 @@ async def ensure_required_resources(bot, guild_settings):
             await sync_to_async(DiscordRole.objects.update_or_create)(
                 discord_id=role.id,
                 guild=guild_settings,
-                defaults={'name': role.name, 'is_deleted': False}
+                defaults={'name': role.name}
             )
     
     # Check bounce channel
@@ -220,7 +220,7 @@ async def ensure_required_resources(bot, guild_settings):
             await sync_to_async(DiscordChannel.objects.update_or_create)(
                 discord_id=channel.id,
                 guild=guild_settings,
-                defaults={'name': channel.name, 'is_deleted': False}
+                defaults={}
             )
     
     # Check approvals channel if in APPROVAL mode
@@ -235,5 +235,5 @@ async def ensure_required_resources(bot, guild_settings):
             await sync_to_async(DiscordChannel.objects.update_or_create)(
                 discord_id=channel.id,
                 guild=guild_settings,
-                defaults={'name': channel.name, 'is_deleted': False}
+                defaults={}
             )

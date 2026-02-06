@@ -98,6 +98,17 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# CSRF trust for Railway domains and local testing
+CSRF_TRUSTED_ORIGINS = [
+    'https://*.railway.app',
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
+]
+
+# CSRF cookie settings for production
+CSRF_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_HTTPONLY = False  # Must be False so JavaScript can read CSRF token
+
 import cloudinary
 
 cloudinary.config(
