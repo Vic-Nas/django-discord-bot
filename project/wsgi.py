@@ -3,6 +3,16 @@ import sys
 import signal
 from django.core.wsgi import get_wsgi_application
 
+# Install signal handlers FIRST
+def handle_signal(signum, frame):
+    sig_name = signal.Signals(signum).name
+    print(f"[WSGI] Received signal {sig_name} ({signum})", flush=True)
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+signal.signal(signal.SIGTERM, handle_signal)
+signal.signal(signal.SIGINT, handle_signal)
+
 print("[WSGI] Starting WSGI initialization", flush=True)
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'project.settings')
