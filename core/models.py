@@ -133,15 +133,12 @@ class Application(models.Model):
 
 
 class BotCommand(models.Model):
-    """Bot command with per-server configuration (consolidated model)"""
+    """Bot command with per-server configuration"""
     guild = models.ForeignKey(GuildSettings, on_delete=models.CASCADE, related_name='commands', null=True, blank=True)
-    name = models.CharField(max_length=50, default='')  # e.g., 'addrule', 'help'
+    name = models.CharField(max_length=50)  # e.g., 'verify', 'welcome'
     description = models.TextField(default='')
-    handler_function = models.CharField(max_length=100, default='')  # Python function name
-    admin_only = models.BooleanField(default=False)
     enabled = models.BooleanField(default=True)
-    custom_name = models.CharField(max_length=50, blank=True)  # Override command name for this server
-    allowed_roles = models.ManyToManyField(DiscordRole, blank=True, related_name='allowed_commands')
+    custom_name = models.CharField(max_length=50, blank=True)  # Override display name for this server
     
     class Meta:
         db_table = 'bot_commands'
@@ -150,8 +147,36 @@ class BotCommand(models.Model):
     def __str__(self):
         display_name = self.custom_name or self.name
         status = 'ON' if self.enabled else 'OFF'
-        guild_name = self.guild.guild_name if self.guild else 'N/A'
+        guild_name = self.guild.guild_name if self.guild else 'Global'
         return f"{guild_name}: {display_name} [{status}]"
+
+
+class CommandAction(models.Model):
+    """Executable action that chains in sequence within a command"""
+    ACTION_TYPES = [
+        ('SEND_MESSAGE', 'Send Message'),
+        ('ASSIGN_ROLE', 'Assign Role'),
+        ('REMOVE_ROLE', 'Remove Role'),
+        ('CREATE_CHANNEL', 'Create Channel'),
+        ('DELETE_CHANNEL', 'Delete Channel'),
+        ('POLL', 'Create Poll'),
+        ('WEBHOOK', 'Call Webhook'),
+    ]
+    
+    command = models.ForeignKey(BotCommand, on_delete=models.CASCADE, related_name='actions')
+    order = models.IntegerField(default=0)  # Execution order
+    type = models.CharField(max_length=30, choices=ACTION_TYPES)
+    name = models.CharField(max_length=100)  # Unique name within command, e.g., "send_welcome"
+    parameters = models.JSONField(default=dict)  # Type-specific config
+    enabled = models.BooleanField(default=True)
+    
+    class Meta:
+        db_table = 'command_actions'
+        unique_together = ['command', 'name']
+        ordering = ['order']
+    
+    def __str__(self):
+        return f"{self.command.name}: {self.name} ({self.get_type_display()})"
 
 
 class MessageTemplate(models.Model):
