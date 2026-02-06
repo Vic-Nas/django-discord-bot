@@ -5,6 +5,11 @@ from .models import (
     MessageTemplate, GuildMessageTemplate, AccessToken
 )
 
+# Customize admin site
+admin.site.site_header = "Discord Bot Admin"
+admin.site.site_title = "Bot Management"
+admin.site.index_title = "Dashboard"
+
 admin.site.register(GuildSettings)
 admin.site.register(DiscordRole)
 admin.site.register(DiscordChannel)
