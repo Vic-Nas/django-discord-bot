@@ -71,7 +71,7 @@ You may reapply in the future if server rules allow.""",
     'GETACCESS_RESPONSE': """🔑 **Admin Panel Access**
 
 Here's your access link:
-[🔗 Access Admin Panel]({url})
+{url}
 
 ⏰ **Expires:** {expires}
 
@@ -79,7 +79,7 @@ Keep this link private!""",
 
     'GETACCESS_EXISTS': """🔑 **You already have an active token!**
 
-[🔗 Access Admin Panel]({url})
+{url}
 
 ⏰ **Expires:** {expires}""",
 
