@@ -29,9 +29,10 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    'project.debug_middleware.DebugRequestMiddleware',
+    # Temporarily disable debug middleware to test if it's causing issues
+    # 'project.debug_middleware.DebugRequestMiddleware',
     'django.middleware.security.SecurityMiddleware',
-    # Temporarily disable whitenoise to see if that's causing the hang
+    # Temporarily disable whitenoise to test
     # 'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',

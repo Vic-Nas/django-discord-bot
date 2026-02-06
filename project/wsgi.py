@@ -52,35 +52,25 @@ except Exception as e:
 from django.db import connections
 
 
-class DatabaseResetMiddleware:
-    """Ensure database connections are properly reset"""
+class SimpleLogMiddleware:
+    """Minimal middleware just for logging"""
     
     def __init__(self, wsgi_app):
-        print("[WSGI_MIDDLEWARE] DatabaseResetMiddleware initialized", flush=True)
+        print("[WSGI_APP] SimpleLogMiddleware initialized", flush=True)
         sys.stdout.flush()
         self.wsgi_app = wsgi_app
     
     def __call__(self, environ, start_response):
-        path = environ.get('PATH_INFO', '/')
-        method = environ.get('REQUEST_METHOD', 'GET')
-        print(f"[WSGI_MIDDLEWARE] Request: {method} {path}", flush=True)
-        sys.stdout.flush()
-        sys.stderr.flush()
-        
         try:
-            result = self.wsgi_app(environ, start_response)
-            print(f"[WSGI_MIDDLEWARE] Response complete for {method} {path}", flush=True)
-            sys.stdout.flush()
-            return result
+            return self.wsgi_app(environ, start_response)
         except Exception as e:
-            print(f"[WSGI_MIDDLEWARE] Exception: {type(e).__name__}: {e}", flush=True)
+            print(f"[WSGI_APP] Request failed: {e}", flush=True)
             sys.stdout.flush()
-            sys.stderr.flush()
             raise
 
 
 # Wrap the application
-application = DatabaseResetMiddleware(application)
+application = SimpleLogMiddleware(application)
 
 print("[WSGI] WSGI application loaded successfully", flush=True)
 sys.stdout.flush()
