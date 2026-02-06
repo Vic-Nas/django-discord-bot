@@ -81,17 +81,17 @@ async def handle_auto_mode(bot, member, guild_settings, invite_data):
     invite_code = invite_data['code']
     
     try:
-        rule = InviteRule.objects.prefetch_related('roles').get(
+        rule = await sync_to_async(lambda: InviteRule.objects.prefetch_related('roles').get(
             guild=guild_settings,
             invite_code=invite_code
-        )
+        ))()
     except InviteRule.DoesNotExist:
         # Try default rule
         try:
-            rule = InviteRule.objects.prefetch_related('roles').get(
+            rule = await sync_to_async(lambda: InviteRule.objects.prefetch_related('roles').get(
                 guild=guild_settings,
                 invite_code='default'
-            )
+            ))()
         except InviteRule.DoesNotExist:
             print(f'⚠️ No rule for invite {invite_code} and no default rule')
             await log_join(bot, member, guild_settings, invite_data, [], 'AUTO')
@@ -223,7 +223,7 @@ async def send_application_form(bot, member, guild_settings, invite_data):
         inviter_id = invite_data['inviter'].id if invite_data['inviter'] else None
         inviter_name = invite_data['inviter'].name if invite_data['inviter'] else 'Unknown'
         
-        application = Application.objects.create(
+        application = await sync_to_async(Application.objects.create)(
             guild=guild_settings,
             user_id=member.id,
             user_name=str(member),
