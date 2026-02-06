@@ -1,4 +1,5 @@
 from core.models import MessageTemplate, GuildMessageTemplate
+from asgiref.sync import sync_to_async
 
 
 # Default templates
@@ -120,6 +121,11 @@ def get_template(guild_settings, template_type):
     
     # Fallback to hardcoded default
     return DEFAULT_TEMPLATES.get(template_type, "{message}")
+
+
+async def get_template_async(guild_settings, template_type):
+    """Async wrapper for get_template"""
+    return await sync_to_async(get_template)(guild_settings, template_type)
 
 
 def init_default_templates():

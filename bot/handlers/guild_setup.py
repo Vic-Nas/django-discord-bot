@@ -1,6 +1,6 @@
 import discord
 from core.models import GuildSettings, DiscordRole, DiscordChannel
-from .templates import get_template
+from .templates import get_template_async
 from asgiref.sync import sync_to_async
 
 
@@ -61,7 +61,7 @@ async def setup_guild(bot, guild):
     await sync_to_async(guild_settings.save)()
     
     # Send welcome message to logs
-    template = get_template(guild_settings, 'INSTALL_WELCOME')
+    template = await get_template_async(guild_settings, 'INSTALL_WELCOME')
     message = template.format(
         bot_admin=bot_admin_role.mention,
         pending=pending_role.mention,

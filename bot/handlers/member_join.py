@@ -1,6 +1,6 @@
 import discord
 from core.models import GuildSettings, InviteRule, Application
-from .templates import get_template
+from .templates import get_template_async
 from .guild_setup import ensure_required_resources
 from asgiref.sync import sync_to_async
 
@@ -152,7 +152,7 @@ async def log_join(bot, member, guild_settings, invite_data, roles, mode):
         return
     
     template_type = 'JOIN_LOG_AUTO' if mode == 'AUTO' else 'JOIN_LOG_APPROVAL'
-    template = get_template(guild_settings, template_type)
+    template = await get_template_async(guild_settings, template_type)
     
     inviter_name = invite_data['inviter'].name if invite_data['inviter'] else 'Unknown'
     roles_str = ', '.join(roles) if roles else 'None'
@@ -176,11 +176,11 @@ async def send_application_form(bot, member, guild_settings, invite_data):
     
     # Get form fields
     from core.models import FormField
-    fields = FormField.objects.filter(guild=guild_settings).order_by('order')
+    fields = await sync_to_async(lambda: list(FormField.objects.filter(guild=guild_settings).order_by('order')))()
     
-    if not fields.exists():
+    if not fields:
         # No form configured, just notify user
-        template = get_template(guild_settings, 'APPLICATION_SENT')
+        template = await get_template_async(guild_settings, 'APPLICATION_SENT')
         message = template.format(server=member.guild.name)
         
         try:
@@ -234,7 +234,7 @@ async def send_application_form(bot, member, guild_settings, invite_data):
         )
         
         # Confirm to user
-        template = get_template(guild_settings, 'APPLICATION_SENT')
+        template = await get_template_async(guild_settings, 'APPLICATION_SENT')
         message = template.format(server=member.guild.name)
         await member.send(message)
         
@@ -261,14 +261,14 @@ async def post_application_for_review(bot, guild_settings, member, application, 
     
     # Format responses
     from core.models import FormField
-    fields = FormField.objects.filter(guild=guild_settings).order_by('order')
+    fields = await sync_to_async(lambda: list(FormField.objects.filter(guild=guild_settings).order_by('order')))()
     
     responses_text = ""
     for field in fields:
         answer = application.responses.get(str(field.id), "No answer")
         responses_text += f"**{field.label}:** {answer}\n"
     
-    template = get_template(guild_settings, 'APPROVAL_NOTIFICATION')
+    template = await get_template_async(guild_settings, 'APPROVAL_NOTIFICATION')
     inviter_name = invite_data['inviter'].name if invite_data['inviter'] else 'Unknown'
     
     message = template.format(

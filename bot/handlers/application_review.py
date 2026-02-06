@@ -1,7 +1,8 @@
 import discord
 from django.utils import timezone
 from core.models import GuildSettings, Application, InviteRule
-from .templates import get_template
+from .templates import get_template_async
+from asgiref.sync import sync_to_async
 
 
 async def handle_reaction(bot, payload):
@@ -32,7 +33,7 @@ async def handle_reaction(bot, payload):
     
     # Get application
     try:
-        application = Application.objects.get(id=app_id, status='PENDING')
+        application = await sync_to_async(Application.objects.get)(id=app_id, status='PENDING')
     except Application.DoesNotExist:
         return
     
@@ -130,7 +131,7 @@ async def approve_application(bot, application, applicant, admin, message):
     await message.clear_reactions()
     
     # DM the user
-    template = get_template(guild_settings, 'APPLICATION_APPROVED')
+    template = await get_template_async(guild_settings, 'APPLICATION_APPROVED')
     dm_message = template.format(
         server=guild.name,
         roles=', '.join(role_names) if role_names else 'None'
@@ -154,7 +155,7 @@ async def reject_application(bot, application, applicant, admin, message):
     application.status = 'REJECTED'
     application.reviewed_by = admin.id
     application.reviewed_at = timezone.now()
-    application.save()
+    await sync_to_async(application.save)()
     
     # Update embed
     embed = message.embeds[0]
@@ -164,7 +165,7 @@ async def reject_application(bot, application, applicant, admin, message):
     await message.clear_reactions()
     
     # DM the user
-    template = get_template(guild_settings, 'APPLICATION_REJECTED')
+    template = await get_template_async(guild_settings, 'APPLICATION_REJECTED')
     dm_message = template.format(
         server=guild.name,
         reason="Your application did not meet our requirements at this time."
