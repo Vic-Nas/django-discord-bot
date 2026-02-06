@@ -1,5 +1,5 @@
 import discord
-from core.models import GuildSettings, DiscordRole, DiscordChannel
+from core.models import GuildSettings, DiscordRole, DiscordChannel, BotCommand
 from .templates import get_template_async
 from asgiref.sync import sync_to_async
 
@@ -70,7 +70,54 @@ async def setup_guild(bot, guild):
     
     await sync_to_async(guild_settings.save)()
     
-    # Send diagnostic message if setup encountered issues
+    # Create default commands for this server
+    default_commands = [
+        {
+            'name': 'help',
+            'description': 'Show available commands and how to use them',
+        },
+        {
+            'name': 'getaccess',
+            'description': 'Get a temporary access link to the web panel',
+        },
+        {
+            'name': 'addrule',
+            'description': 'Add an invite rule (Admin only)',
+        },
+        {
+            'name': 'delrule',
+            'description': 'Delete an invite rule (Admin only)',
+        },
+        {
+            'name': 'listrules',
+            'description': 'List all invite rules for this server',
+        },
+        {
+            'name': 'setmode',
+            'description': 'Set server mode: AUTO or APPROVAL (Admin only)',
+        },
+        {
+            'name': 'addfield',
+            'description': 'Add a form field for applications (Admin only)',
+        },
+        {
+            'name': 'listfields',
+            'description': 'List form fields for applications',
+        },
+        {
+            'name': 'reload',
+            'description': 'Reload bot configuration (Admin only)',
+        },
+    ]
+    
+    for cmd in default_commands:
+        await sync_to_async(BotCommand.objects.get_or_create)(
+            guild=guild_settings,
+            name=cmd['name'],
+            defaults={'description': cmd['description'], 'enabled': True}
+        )
+    
+    print(f"✅ Created {len(default_commands)} default commands for {guild.name}")
     if assignment_failed:
         try:
             bot_role = guild.me.top_role
