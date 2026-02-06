@@ -1,1 +1,1 @@
-web: gunicorn project.wsgi:application -c gunicorn_config.py
+web: gunicorn project.wsgi:application --bind 0.0.0.0:$PORT --workers 1 --timeout 120 --access-logfile - --error-logfile - --log-level debug

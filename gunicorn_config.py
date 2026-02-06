@@ -2,14 +2,23 @@ import sys
 import os
 import threading
 
+print(f"[GUNICORN_CONFIG] Loading gunicorn config", flush=True)
+print(f"[GUNICORN_CONFIG] PORT env var: {os.environ.get('PORT', 'NOT SET')}", flush=True)
+print(f"[GUNICORN_CONFIG] DEBUG env var: {os.environ.get('DEBUG', 'NOT SET')}", flush=True)
+sys.stdout.flush()
+
 # Gunicorn configuration with proper worker fork handling
 workers = 1
 worker_class = 'sync'
-bind = '0.0.0.0:' + os.environ.get('PORT', '8000')
+port_value = os.environ.get('PORT', '8000')
+bind = '0.0.0.0:' + port_value
 timeout = 60
 accesslog = '-'
 errorlog = '-'
 access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s'
+
+print(f"[GUNICORN_CONFIG] Binding to: {bind}", flush=True)
+sys.stdout.flush()
 
 
 def when_ready(server):
