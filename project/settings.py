@@ -60,14 +60,26 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'project.wsgi.application'
 
-# Database
+print("[DJANGO_SETTINGS] Building database config", flush=True)
+sys.stdout.flush()
+
+db_url = os.environ.get('DATABASE_URL')
+print(f"[DJANGO_SETTINGS] DATABASE_URL present: {bool(db_url)}", flush=True)
+sys.stdout.flush()
+
 DATABASES = {
-    'default': dj_database_url.parse(
-        os.environ.get(
-            'DATABASE_URL'
-        )
-    )
+    'default': dj_database_url.parse(db_url)
 }
+
+print(f"[DJANGO_SETTINGS] Database config: {DATABASES['default'].get('ENGINE', 'unknown')}", flush=True)
+sys.stdout.flush()
+
+# Disable persistent database connections to handle worker fork properly
+print("[DJANGO_SETTINGS] Disabling persistent connections", flush=True)
+sys.stdout.flush()
+
+DATABASES['default']['CONN_MAX_AGE'] = 0
+DATABASES['default']['AUTOCOMMIT'] = True
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
