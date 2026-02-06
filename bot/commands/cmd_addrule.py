@@ -1,5 +1,6 @@
 from core.models import InviteRule, DiscordRole
-from handlers.templates import get_template
+from handlers.templates import get_template_async
+from asgiref.sync import sync_to_async
 
 
 async def cmd_addrule(bot, message, args, guild_settings, invite_cache):
@@ -34,7 +35,7 @@ async def cmd_addrule(bot, message, args, guild_settings, invite_cache):
             return
         
         # Get or create in DB
-        db_role, created = DiscordRole.objects.get_or_create(
+        db_role, created = await sync_to_async(DiscordRole.objects.get_or_create)(
             discord_id=discord_role.id,
             guild=guild_settings,
             defaults={'name': discord_role.name, 'is_deleted': False}
@@ -43,12 +44,12 @@ async def cmd_addrule(bot, message, args, guild_settings, invite_cache):
         if not created:
             db_role.name = discord_role.name
             db_role.is_deleted = False
-            db_role.save()
+            await sync_to_async(db_role.save)()
         
         roles_to_add.append(db_role)
     
     # Create or update rule
-    rule, created = InviteRule.objects.get_or_create(
+    rule, created = await sync_to_async(InviteRule.objects.get_or_create)(
         guild=guild_settings,
         invite_code=invite_code,
         defaults={'description': description}
@@ -56,16 +57,16 @@ async def cmd_addrule(bot, message, args, guild_settings, invite_cache):
     
     if not created:
         rule.description = description
-        rule.save()
+        await sync_to_async(rule.save)()
     
     # Set roles
-    rule.roles.clear()
-    rule.roles.add(*roles_to_add)
+    await sync_to_async(rule.roles.clear)()
+    await sync_to_async(rule.roles.add)(*roles_to_add)
     
     action = "created" if created else "updated"
     role_list = ', '.join([r.name for r in roles_to_add])
     
-    template = get_template(guild_settings, 'COMMAND_SUCCESS')
+    template = await get_template_async(guild_settings, 'COMMAND_SUCCESS')
     msg = template.format(
         message=f"Rule `{invite_code}` {action}!\nRoles: {role_list}"
     )

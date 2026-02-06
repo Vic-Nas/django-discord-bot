@@ -1,7 +1,8 @@
 import discord
-from handlers.templates import get_template
+from handlers.templates import get_template_async
 from handlers.guild_setup import get_or_create_channel
 from core.models import DiscordChannel
+from asgiref.sync import sync_to_async
 
 
 async def cmd_setmode(bot, message, args, guild_settings, invite_cache):
@@ -32,15 +33,15 @@ async def cmd_setmode(bot, message, args, guild_settings, invite_cache):
             guild_settings.approvals_channel_id = approvals_channel.id
             
             # Cache in DB
-            DiscordChannel.objects.update_or_create(
+            await sync_to_async(DiscordChannel.objects.update_or_create)(
                 discord_id=approvals_channel.id,
                 guild=guild_settings,
                 defaults={'name': approvals_channel.name, 'is_deleted': False}
             )
     
-    guild_settings.save()
+    await sync_to_async(guild_settings.save)()
     
-    template = get_template(guild_settings, 'COMMAND_SUCCESS')
+    template = await get_template_async(guild_settings, 'COMMAND_SUCCESS')
     msg = template.format(
         message=f"Server mode changed from **{old_mode}** to **{mode}**"
     )

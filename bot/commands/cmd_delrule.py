@@ -1,5 +1,6 @@
 from core.models import InviteRule
-from handlers.templates import get_template
+from handlers.templates import get_template_async
+from asgiref.sync import sync_to_async
 
 
 async def cmd_delrule(bot, message, args, guild_settings, invite_cache):
@@ -15,10 +16,10 @@ async def cmd_delrule(bot, message, args, guild_settings, invite_cache):
     invite_code = args[0]
     
     try:
-        rule = InviteRule.objects.get(guild=guild_settings, invite_code=invite_code)
-        rule.delete()
+        rule = await sync_to_async(InviteRule.objects.get)(guild=guild_settings, invite_code=invite_code)
+        await sync_to_async(rule.delete)()
         
-        template = get_template(guild_settings, 'COMMAND_SUCCESS')
+        template = await get_template_async(guild_settings, 'COMMAND_SUCCESS')
         msg = template.format(message=f"Rule `{invite_code}` deleted!")
         await message.channel.send(msg)
         
