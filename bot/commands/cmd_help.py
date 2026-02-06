@@ -1,5 +1,6 @@
 import discord
 from handlers.templates import get_template_async
+from asgiref.sync import sync_to_async
 
 
 async def cmd_help(bot, message, args, guild_settings, invite_cache):
@@ -7,8 +8,8 @@ async def cmd_help(bot, message, args, guild_settings, invite_cache):
     
     from . import command_registry
     
-    # Get commands available to this user
-    commands = command_registry.get_commands_for_user(guild_settings, message.author.roles)
+    # Get commands available to this user (wrap in sync_to_async)
+    commands = await sync_to_async(command_registry.get_commands_for_user)(guild_settings, message.author.roles)
     
     if not commands:
         await message.channel.send("❌ No commands available.")
