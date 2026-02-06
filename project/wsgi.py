@@ -68,23 +68,12 @@ class DatabaseResetMiddleware:
         sys.stderr.flush()
         
         try:
-            print("[WSGI_MIDDLEWARE] Closing database connections", flush=True)
-            sys.stdout.flush()
-            
-            # Ensure all connections are closed before handling request
-            connections.close_all()
-            
-            print("[WSGI_MIDDLEWARE] Calling wrapped app", flush=True)
-            sys.stdout.flush()
-            
             result = self.wsgi_app(environ, start_response)
-            
-            print("[WSGI_MIDDLEWARE] App returned successfully", flush=True)
+            print(f"[WSGI_MIDDLEWARE] Response complete for {method} {path}", flush=True)
             sys.stdout.flush()
-            
             return result
         except Exception as e:
-            print(f"[WSGI_MIDDLEWARE] Exception: {e}", flush=True)
+            print(f"[WSGI_MIDDLEWARE] Exception: {type(e).__name__}: {e}", flush=True)
             sys.stdout.flush()
             sys.stderr.flush()
             raise
