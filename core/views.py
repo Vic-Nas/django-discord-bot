@@ -1,8 +1,13 @@
 from django.shortcuts import render, redirect
 from django.contrib.auth import login
 from django.contrib.auth.models import User
-from django.http import HttpResponseForbidden
+from django.http import HttpResponseForbidden, HttpResponse, JsonResponse
 from .models import AccessToken, GuildSettings
+
+
+def health_check(request):
+    """Simple health check for Railway"""
+    return JsonResponse({'status': 'ok'})
 
 
 def token_login(request):
