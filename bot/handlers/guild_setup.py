@@ -68,14 +68,16 @@ async def setup_guild(bot, guild):
     
     # Send welcome message to bounce channel
     try:
-        template = await get_template_async(guild_settings, 'INSTALL_WELCOME')
-        message = template.format(
-            bot_admin=bot_admin_role.mention,
-            pending=pending_role.mention,
-            logs=bounce_channel.mention,
-            bot_mention=bot.user.mention
-        )
-        await bounce_channel.send(message)
+        # Ensure channel is accessible
+        if bounce_channel:
+            template = await get_template_async(guild_settings, 'INSTALL_WELCOME')
+            message = template.format(
+                bot_admin=bot_admin_role.mention,
+                pending=pending_role.mention,
+                logs=bounce_channel.mention,
+                bot_mention=bot.user.mention
+            )
+            await bounce_channel.send(message)
     except Exception as e:
         print(f"Failed to send welcome message: {e}")
 
@@ -118,7 +120,12 @@ async def get_or_create_channel(guild, name, admin_role):
         guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
     }
     
-    channel = await guild.create_text_channel(name, overwrites=overwrites)
+    try:
+        channel = await guild.create_text_channel(name, overwrites=overwrites)
+    except Exception:
+        # If creation fails, try without overwrites
+        channel = await guild.create_text_channel(name)
+    
     return channel
 
 
