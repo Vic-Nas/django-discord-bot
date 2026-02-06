@@ -2,25 +2,9 @@ from django.contrib import admin
 from django.urls import path
 from django.conf import settings
 from django.conf.urls.static import static
-from django.views.static import serve
-from django.http import FileResponse, HttpResponseNotFound
 from core import views
-import os
-
-def favicon(request):
-    """Serve favicon.png directly from project/static"""
-    try:
-        favicon_path = os.path.join(settings.BASE_DIR, 'project', 'static', 'favicon.png')
-        if os.path.exists(favicon_path):
-            return FileResponse(open(favicon_path, 'rb'), content_type='image/png')
-    except Exception:
-        pass
-    # If favicon not found, return 404
-    return HttpResponseNotFound('Favicon not found')
 
 urlpatterns = [
-    path('favicon.png', favicon),
-    path('favicon.ico', favicon),  # Browser looks for .ico, but we serve .png
     path('admin/', admin.site.urls),
     path('ping', views.ping, name='ping'),
     path('health', views.health_check, name='health_check'),
