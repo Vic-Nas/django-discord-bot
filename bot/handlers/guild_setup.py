@@ -93,6 +93,16 @@ async def get_or_create_channel(guild, name, admin_role):
     channel = discord.utils.get(guild.text_channels, name=name)
     
     if channel:
+        # Update permissions to ensure bot can send messages
+        try:
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                admin_role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+                guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+            }
+            await channel.edit(overwrites=overwrites)
+        except Exception as e:
+            print(f'⚠️ Could not update permissions for {name}: {e}')
         return channel
     
     # Create channel with permissions
