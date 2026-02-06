@@ -62,12 +62,19 @@ python bot/main.py
 **Bot Permissions Required:**
 
 When creating the OAuth2 invite URL in Discord Developer Portal, grant these permissions:
+- **Manage Guild** - View and manage server invites
 - **Manage Roles** - Assign roles to members
 - **Manage Channels** - Create/update logs and approvals channels
 - **Send Messages** - Post in logs and approvals channels
 - **Read Messages/View Channels** - Access channel content
 - **Read Message History** - Log historical messages
 
+Invite URL with correct permissions:
+```
+https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=268504112&scope=bot
+```
+
+Replace `YOUR_CLIENT_ID` with your bot's Client ID from Discord Developer Portal.
 
 ## Commands
 
