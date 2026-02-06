@@ -43,7 +43,7 @@ Manage Discord roles via invite links with web admin. Two modes: **AUTO** (insta
 
 ```bash
 git clone https://github.com/Vic-Nas/django-discord-bot
-cd discord-discord-bot
+cd django-discord-bot
 pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your credentials
