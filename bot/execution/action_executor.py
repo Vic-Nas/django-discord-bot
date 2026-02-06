@@ -33,7 +33,7 @@ async def execute_command_actions(bot, message, command_obj):
     
     # Get all actions ordered by order field
     actions = await sync_to_async(
-        lambda: list(command_obj.commandaction_set.filter(enabled=True).order_by('order'))
+        lambda: list(command_obj.actions.filter(enabled=True).order_by('order'))
     )()
     
     if not actions:
