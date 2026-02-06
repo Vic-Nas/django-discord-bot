@@ -101,7 +101,7 @@ async def handle_auto_mode(bot, member, guild_settings, invite_data):
     roles_to_assign = []
     role_names = []
     
-    for db_role in rule.roles.filter(is_deleted=False):
+    for db_role in rule.roles.all():
         discord_role = member.guild.get_role(db_role.discord_id)
         if discord_role:
             roles_to_assign.append(discord_role)
