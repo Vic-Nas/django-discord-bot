@@ -76,7 +76,7 @@ async def cmd_getaccess(bot, message, args, guild_settings, invite_cache):
         app_url = os.getenv('APP_URL', 'http://localhost:8000')
         if not app_url.startswith(('http://', 'https://')):
             app_url = f"https://{app_url}"
-        url = f"{app_url}/auth/login?token={existing_token.token}"
+        url = f"{app_url}/auth/login/?token={existing_token.token}"
         url_link = f"[Admin Panel]({url})"
         
         template = await get_template_async(guild_settings, 'GETACCESS_EXISTS')
@@ -101,7 +101,7 @@ async def cmd_getaccess(bot, message, args, guild_settings, invite_cache):
     app_url = os.getenv('APP_URL', 'http://localhost:8000')
     if not app_url.startswith(('http://', 'https://')):
         app_url = f"https://{app_url}"
-    url = f"{app_url}/auth/login?token={token.token}"
+    url = f"{app_url}/auth/login/?token={token.token}"
     url_link = f"[Admin Panel]({url})"
     
     template = await get_template_async(guild_settings, 'GETACCESS_RESPONSE')
