@@ -23,12 +23,11 @@ Manage Discord roles via invite links with web admin. Two modes: **AUTO** (insta
 
 [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/your-template)
 
-1. Click Deploy on Railway ([referral link](https://railway.app?referralCode=YOUR_CODE))
+1. Click [Deploy on Railway](https://railway.com?referralCode=ZIdvo-)
 2. Add PostgreSQL database
 3. Set environment variables (see `.env.example`)
-4. Run in Railway terminal:
+4. Run in your terminal(with .env file):
    ```bash
-   python manage.py makemigrations
    python manage.py migrate
    python manage.py init_defaults
    ```
@@ -47,7 +46,6 @@ cd discord-role-bot
 pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your credentials
-python manage.py makemigrations
 python manage.py migrate
 python manage.py init_defaults
 python bot/main.py
