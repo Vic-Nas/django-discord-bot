@@ -1,7 +1,11 @@
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 import dj_database_url
+
+print("[DJANGO_SETTINGS] Starting settings.py load", flush=True)
+sys.stdout.flush()
 
 load_dotenv()
 
@@ -93,3 +97,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 #     api_key=os.getenv('CLOUDINARY_API_KEY'),
 #     api_secret=os.getenv('CLOUDINARY_API_SECRET'),
 # )
+
+print("[DJANGO_SETTINGS] Settings.py loaded successfully", flush=True)
+sys.stdout.flush()
+
