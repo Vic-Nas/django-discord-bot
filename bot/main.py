@@ -12,10 +12,10 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'project.settings')
 django.setup()
 
 from core.models import GuildSettings, AccessToken
-from handlers.guild_setup import setup_guild
-from handlers.member_join import handle_member_join
-from handlers.sync import sync_guild_data
-from commands import command_registry
+from bot.handlers.guild_setup import setup_guild
+from bot.handlers.member_join import handle_member_join
+from bot.handlers.sync import sync_guild_data
+from bot.commands import command_registry
 
 load_dotenv()
 

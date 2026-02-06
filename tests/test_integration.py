@@ -30,7 +30,9 @@ from bot.execution.action_executor import (
     handle_set_server_mode,
     handle_list_commands,
     handle_add_form_field,
+    handle_list_form_fields,
     handle_generate_access_token,
+    handle_reload_config,
 )
 from bot.main import bot as main_bot
 
@@ -41,24 +43,23 @@ from bot.main import bot as main_bot
 class TestHandlersWithRealGuild:
     """Test handlers with real Discord guild objects"""
     
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(autouse=True)
     async def setup_guild_connection(self):
         """Connect to Discord and get real guild"""
         test_guild_id = int(os.getenv('TEST_GUILD_ID', '0'))
+        token = os.getenv('DISCORD_TOKEN')
+        
+        if not token:
+            pytest.skip("DISCORD_TOKEN not set in .env")
         
         if test_guild_id == 0:
             pytest.skip("TEST_GUILD_ID not set in .env")
         
-        # Connect bot to Discord
-        self.connected = False
-        try:
-            await main_bot.login()
-            self.connected = True
-            await asyncio.sleep(2)
-        except Exception as e:
-            pytest.skip(f"Could not connect to Discord: {e}")
+        # Check if bot is already connected
+        if main_bot.user is None:
+            pytest.skip("Bot is not running. Integration tests require bot to be active.")
         
-        # Get real guild
+        # Get real guild from already-connected bot
         self.guild = main_bot.get_guild(test_guild_id)
         if not self.guild:
             pytest.skip(f"Guild {test_guild_id} not found")
@@ -69,11 +70,10 @@ class TestHandlersWithRealGuild:
             defaults={'guild_name': f'Test-{self.guild.name}'}
         )
         
+        self.connected = False
         yield
         
-        # Cleanup
-        if self.connected:
-            await main_bot.close()
+        # Cleanup (no need to close since bot was already running)
     
     @pytest.mark.asyncio
     async def test_add_invite_rule_with_real_roles(self):
@@ -204,6 +204,73 @@ class TestHandlersWithRealGuild:
         
         # Cleanup
         await sync_to_async(token.delete)()
+    
+    @pytest.mark.asyncio
+    async def test_set_server_mode(self):
+        """Test setting server mode (AUTO/APPROVAL)"""
+        message = AsyncMock()
+        message.channel = AsyncMock()
+        
+        params = {}
+        args = ['AUTO']
+        
+        await handle_set_server_mode(main_bot, message, params, args, self.guild_settings)
+        
+        # Verify mode was set
+        updated_settings = await sync_to_async(GuildSettings.objects.get)(
+            guild_id=self.guild_settings.guild_id
+        )
+        assert updated_settings.server_mode == 'AUTO'
+        
+        # Test APPROVAL mode
+        args = ['APPROVAL']
+        await handle_set_server_mode(main_bot, message, params, args, self.guild_settings)
+        
+        updated_settings = await sync_to_async(GuildSettings.objects.get)(
+            guild_id=self.guild_settings.guild_id
+        )
+        assert updated_settings.server_mode == 'APPROVAL'
+    
+    @pytest.mark.asyncio
+    async def test_list_form_fields(self):
+        """Test listing form fields"""
+        # Create test fields
+        field1 = await sync_to_async(FormField.objects.create)(
+            guild=self.guild_settings,
+            label='Field1',
+            field_type='text',
+            order=1
+        )
+        field2 = await sync_to_async(FormField.objects.create)(
+            guild=self.guild_settings,
+            label='Field2',
+            field_type='textarea',
+            order=2
+        )
+        
+        message = AsyncMock()
+        message.channel = AsyncMock()
+        
+        await handle_list_form_fields(main_bot, message, {}, self.guild_settings)
+        
+        # Verify send was called
+        assert message.channel.send.called
+        
+        # Cleanup
+        await sync_to_async(field1.delete)()
+        await sync_to_async(field2.delete)()
+    
+    @pytest.mark.asyncio
+    async def test_reload_config(self):
+        """Test reloading bot configuration"""
+        message = AsyncMock()
+        message.channel = AsyncMock()
+        
+        # Should execute without errors
+        await handle_reload_config(main_bot, message, {}, self.guild_settings)
+        
+        # Verify send was called
+        assert message.channel.send.called
     
     @pytest.mark.asyncio
     async def test_handler_in_dm_context(self):
