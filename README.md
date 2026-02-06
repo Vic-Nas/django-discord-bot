@@ -2,7 +2,7 @@
 
 Manage Discord roles via invite links with web admin. Two modes: **AUTO** (instant role assignment) or **APPROVAL** (application forms with admin review).
 
-## [🔗 Invite Bot](https://discord.com/oauth2/authorize?client_id=1430005122917990410&permissions=268504080&integration_type=0&scope=bot) | [📖 Documentation](#commands)
+## [🔗 Invite Bot](https://discord.com/oauth2/authorize?client_id=1430005122917990410&permissions=268504112&integration_type=0&scope=bot) | [📖 Documentation](#commands)
 
 ---
 
