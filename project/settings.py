@@ -56,6 +56,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'project.error_logging_middleware.ErrorLoggingMiddleware',  # Log ALL exceptions first
     # Temporarily disable debug middleware to test if it's causing issues
     # 'project.debug_middleware.DebugRequestMiddleware',
     'django.middleware.security.SecurityMiddleware',
