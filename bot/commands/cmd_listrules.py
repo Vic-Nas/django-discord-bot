@@ -18,7 +18,11 @@ async def cmd_listrules(bot, message, args, guild_settings, invite_cache):
     )
     
     for rule in rules:
-        role_names = ', '.join([r.name for r in await sync_to_async(lambda: list(rule.roles.filter(is_deleted=False)))())])
+        # Get roles that are not deleted
+        active_roles = await sync_to_async(lambda: list(rule.roles.filter(is_deleted=False)))()
+        role_names = ', '.join([r.name for r in active_roles])
+        
+        # Count deleted roles
         deleted_roles = await sync_to_async(lambda: rule.roles.filter(is_deleted=True).count())()
         
         value = f"**Roles:** {role_names if role_names else 'None'}"
