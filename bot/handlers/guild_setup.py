@@ -1,5 +1,5 @@
 import discord
-from core.models import GuildSettings, DiscordRole, DiscordChannel, BotCommand
+from core.models import GuildSettings, DiscordRole, DiscordChannel, BotCommand, CommandAction
 from .templates import get_template_async
 from asgiref.sync import sync_to_async
 
@@ -70,54 +70,94 @@ async def setup_guild(bot, guild):
     
     await sync_to_async(guild_settings.save)()
     
-    # Create default commands for this server
+    # Create default commands for this server with placeholder actions
     default_commands = [
         {
             'name': 'help',
             'description': 'Show available commands and how to use them',
+            'actions': [
+                {'type': 'SEND_MESSAGE', 'name': 'send_help', 'parameters': {'text': 'Available commands will be listed here. Edit this command to customize.'}},
+            ]
         },
         {
             'name': 'getaccess',
             'description': 'Get a temporary access link to the web panel',
+            'actions': [
+                {'type': 'SEND_MESSAGE', 'name': 'send_token', 'parameters': {'text': 'Your access token will be sent here. Configure this action.'}},
+            ]
         },
         {
             'name': 'addrule',
             'description': 'Add an invite rule (Admin only)',
+            'actions': [
+                {'type': 'SEND_MESSAGE', 'name': 'confirm', 'parameters': {'text': 'Rule added successfully!'}},
+            ]
         },
         {
             'name': 'delrule',
             'description': 'Delete an invite rule (Admin only)',
+            'actions': [
+                {'type': 'SEND_MESSAGE', 'name': 'confirm', 'parameters': {'text': 'Rule deleted successfully!'}},
+            ]
         },
         {
             'name': 'listrules',
             'description': 'List all invite rules for this server',
+            'actions': [
+                {'type': 'SEND_MESSAGE', 'name': 'send_list', 'parameters': {'text': 'Rules will be listed here.'}},
+            ]
         },
         {
             'name': 'setmode',
             'description': 'Set server mode: AUTO or APPROVAL (Admin only)',
+            'actions': [
+                {'type': 'SEND_MESSAGE', 'name': 'confirm', 'parameters': {'text': 'Server mode updated!'}},
+            ]
         },
         {
             'name': 'addfield',
             'description': 'Add a form field for applications (Admin only)',
+            'actions': [
+                {'type': 'SEND_MESSAGE', 'name': 'confirm', 'parameters': {'text': 'Form field added!'}},
+            ]
         },
         {
             'name': 'listfields',
             'description': 'List form fields for applications',
+            'actions': [
+                {'type': 'SEND_MESSAGE', 'name': 'send_list', 'parameters': {'text': 'Form fields will be listed here.'}},
+            ]
         },
         {
             'name': 'reload',
             'description': 'Reload bot configuration (Admin only)',
+            'actions': [
+                {'type': 'SEND_MESSAGE', 'name': 'confirm', 'parameters': {'text': 'Configuration reloaded!'}},
+            ]
         },
     ]
     
     for cmd in default_commands:
-        await sync_to_async(BotCommand.objects.get_or_create)(
+        bot_cmd, _ = await sync_to_async(BotCommand.objects.get_or_create)(
             guild=guild_settings,
             name=cmd['name'],
             defaults={'description': cmd['description'], 'enabled': True}
         )
+        
+        # Create default actions for this command
+        for action_order, action in enumerate(cmd.get('actions', []), start=1):
+            await sync_to_async(CommandAction.objects.get_or_create)(
+                command=bot_cmd,
+                name=action['name'],
+                defaults={
+                    'order': action_order,
+                    'type': action['type'],
+                    'parameters': action['parameters'],
+                    'enabled': True
+                }
+            )
     
-    print(f"✅ Created {len(default_commands)} default commands for {guild.name}")
+    print(f"✅ Created {len(default_commands)} default commands with actions for {guild.name}")
     if assignment_failed:
         try:
             bot_role = guild.me.top_role
