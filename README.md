@@ -1,150 +1,115 @@
 # Discord Role Bot
 
-Manage Discord roles via invite links with web admin. Two modes: **AUTO** (instant role assignment) or **APPROVAL** (application forms with admin review).
+Auto-assign roles via invite links with web admin panel. Two modes: **AUTO** (instant) or **APPROVAL** (with forms).
 
-## [🔗 Invite Bot](https://discord.com/oauth2/authorize?client_id=1430005122917990410&permissions=268504112&integration_type=0&scope=bot) | [📖 Documentation](#commands)
+## [🔗 Invite Bot](https://discord.com/oauth2/authorize?client_id=1430005122917990410&permissions=268504112&integration_type=0&scope=bot)
+
+---
+
+## Deploy to Railway
+
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app)
+
+### Setup (2 services):
+1. **Web Service** (auto-deployed from Dockerfile)
+   - Runs Django admin & API
+   
+2. **Bot Service** (create manually)
+   - In Railway dashboard → New Service
+   - Connect your GitHub repo
+   - Set custom start command: `python bot/main.py`
+   
+3. Add PostgreSQL database (Railway plugin)
+
+4. Set `.env` variables:
+   ```
+   DISCORD_TOKEN=your_bot_token
+   APP_URL=https://your-railway-app.up.railway.app
+   ```
+
+5. Invite bot to Discord server, configure via web admin panel
+
+---
+
+## Local Development
+
+### Setup
+```bash
+git clone https://github.com/Vic-Nas/django-discord-bot
+cd django-discord-bot
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements-dev.txt
+cp .env.example .env
+python manage.py migrate
+python manage.py init_defaults
+```
+
+### Run Tests
+```bash
+# Unit tests (fast, ~30 seconds)
+pytest tests/test_handlers.py -v
+
+# Integration tests (with real Discord, ~3 minutes)
+# Stop Railway bot first, then:
+pytest tests/test_integration.py -m integration -v
+```
+
+### Run Bot Locally
+```bash
+python bot/main.py
+```
 
 ---
 
 ## Features
 
-- 🎯 **AUTO Mode** - Assign roles instantly based on invite link
-- 📝 **APPROVAL Mode** - Application forms with admin review
-- 🌐 **Web Admin Panel** - Manage everything visually
-- 🔧 **Customizable** - Edit messages, forms, permissions
-- 🔒 **Secure** - Token-based admin access
-- 🏢 **Multi-Server** - Independent config per server
+- 🎯 **AUTO Mode** — Instant role assignment  
+- 📝 **APPROVAL Mode** — Forms + admin review  
+- 🌐 **Web Admin** — Manage visually  
+- 🔧 **Customizable** — Edit all messages  
+- 🔒 **Secure** — Token-based access  
+- 🏢 **Multi-Server** — Per-guild config  
 
 ---
 
-## Quick Start
-
-### Deploy to Railway
-
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.com?referralCode=ZIdvo-)
-
-1. Click Deploy on Railway
-2. Add PostgreSQL database
-3. Set environment variables (see `.env.example`)
-4. Wait for the web service to deploy successfully
-5. **Create a second service for the bot:**
-   - In Railway dashboard, create a new service from your repo
-   - Give it a name (e.g., "discord-bot")
-   - In the service settings, add a custom start command: `python bot/main.py`
-   - Deploy
-6. Invite bot to your Discord server
-7. Give yourself `@BotAdmin` role
-8. DM bot: `@BotName getaccess`
-9. Configure via web panel
-
-### Self-Host
-
-**Requirements:** Python 3.10+, PostgreSQL, Cloudinary account
-
-```bash
-git clone https://github.com/Vic-Nas/django-discord-bot
-cd django-discord-bot
-pip install -r requirements.txt
-cp .env.example .env
-# Edit .env with your credentials
-python manage.py migrate
-python manage.py init_defaults
-python bot/main.py
-```
-
-**Environment variables needed:**
-- `DISCORD_TOKEN` - From Discord Developer Portal
-- `DATABASE_URL` - PostgreSQL connection string
-- `CLOUDINARY_*` - From Cloudinary dashboard
-- `SECRET_KEY` - Random string for Django
-- `APP_URL` - Your deployment URL
-
-**Bot Permissions Required:**
-
-When creating the OAuth2 invite URL in Discord Developer Portal, grant these permissions:
-- **Manage Server** - View and manage server invites
-- **Manage Roles** - Assign roles to members
-- **Manage Channels** - Create/update logs and approvals channels
-- **Send Messages** - Post in logs and approvals channels
-- **Read Messages/View Channels** - Access channel content
-- **Read Message History** - Log historical messages
-
-Invite URL with correct permissions:
-```
-https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=268504112&scope=bot
-```
-
-Replace `YOUR_CLIENT_ID` with your bot's Client ID from Discord Developer Portal.
-
 ## Commands
 
-All commands use `@BotName command` format.
-
-**Setup (Admin):**
+**Admin:**
 ```
-@BotName setmode AUTO|APPROVAL
-@BotName addrule <code> <roles> [description]
-@BotName delrule <code>
-@BotName listrules
-@BotName reload
-```
-
-**Forms (Admin, APPROVAL mode):**
-```
-@BotName addfield "Question" text required
-@BotName listfields
+@Bot setmode AUTO|APPROVAL
+@Bot addrule <code> <roles>
+@Bot delrule <code>
+@Bot listrules
+@Bot reload
+@Bot addfield "Question" text
+@Bot listfields
 ```
 
 **General:**
 ```
-@BotName help
-@BotName getaccess (DM only)
+@Bot help
+@Bot getaccess
 ```
 
 ---
 
-## Usage Examples
+## Architecture
 
-### AUTO Mode
-```
-@BotName setmode AUTO
-@BotName addrule premium123 Premium,VIP Premium members
-@BotName addrule free456 Member Free tier
-@BotName addrule default Guest Fallback
-```
-→ User joins via invite → roles assigned instantly
+- **Django**: Database + admin panel + API
+- **discord.py**: Bot (connects to Discord gateway)
+- **PostgreSQL**: Persistent data
+- **Railway**: Hosting
 
-### APPROVAL Mode
-```
-@BotName setmode APPROVAL
-@BotName addfield "Your name?" text required
-@BotName addfield "Why join?" textarea required
-@BotName addrule premium123 Premium,VIP
-```
-→ User joins → fills form → admin reviews in `#approvals` → react ✅/❌
+Each guild has independent config (roles, rules, forms, messages).
 
 ---
 
-## Web Admin
+## Development
 
-Get access: DM bot `@BotName getaccess`
+All handlers include automated testing:
+- Unit tests verify logic
+- Integration tests verify Discord interaction
+- Run before commit: `pytest tests/ -v`
 
-**Features:**
-- Manage invite rules
-- Build application forms
-- Review applications
-- Edit message templates
-- Configure command permissions
-
----
-
-## Support
-
-- 🐛 Issues: GitHub Issues
-- 💬 Questions: GitHub Discussions
-
----
-
-## License
-
-MIT
+See `bot/execution/action_executor.py` for command handlers.
