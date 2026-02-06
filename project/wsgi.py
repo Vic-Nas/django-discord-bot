@@ -51,13 +51,33 @@ class DatabaseResetMiddleware:
         self.wsgi_app = wsgi_app
     
     def __call__(self, environ, start_response):
-        print("[WSGI_MIDDLEWARE] Resetting database connections before request", flush=True)
+        path = environ.get('PATH_INFO', '/')
+        method = environ.get('REQUEST_METHOD', 'GET')
+        print(f"[WSGI_MIDDLEWARE] Request: {method} {path}", flush=True)
         sys.stdout.flush()
+        sys.stderr.flush()
         
-        # Ensure all connections are closed before handling request
-        connections.close_all()
-        
-        return self.wsgi_app(environ, start_response)
+        try:
+            print("[WSGI_MIDDLEWARE] Closing database connections", flush=True)
+            sys.stdout.flush()
+            
+            # Ensure all connections are closed before handling request
+            connections.close_all()
+            
+            print("[WSGI_MIDDLEWARE] Calling wrapped app", flush=True)
+            sys.stdout.flush()
+            
+            result = self.wsgi_app(environ, start_response)
+            
+            print("[WSGI_MIDDLEWARE] App returned successfully", flush=True)
+            sys.stdout.flush()
+            
+            return result
+        except Exception as e:
+            print(f"[WSGI_MIDDLEWARE] Exception: {e}", flush=True)
+            sys.stdout.flush()
+            sys.stderr.flush()
+            raise
 
 
 # Wrap the application

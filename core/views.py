@@ -10,7 +10,18 @@ def health_check(request):
     import sys
     print("[HEALTH_CHECK] Health check endpoint called", flush=True)
     sys.stdout.flush()
-    return JsonResponse({'status': 'healthy'}, status=200)
+    sys.stderr.flush()
+    return JsonResponse({'status': 'healthy', 'timestamp': str(__import__('datetime').datetime.now())}, status=200)
+
+
+def ping(request):
+    """Ultra-simple ping endpoint for testing"""
+    import sys
+    print("[PING] Ping endpoint called", flush=True)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    return HttpResponse('pong')
+
 
 
 def token_login(request):
