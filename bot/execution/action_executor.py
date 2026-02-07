@@ -661,7 +661,7 @@ async def _bulk_approve_pending(bot, message, guild_settings, pending_role, admi
 
     approvals_channel = message.guild.get_channel(guild_settings.approvals_channel_id) or message.channel
 
-    summary = {'approved': 0, 'skipped_no_form': 0, 'skipped_already_reviewed': 0, 'role_failures': 0, 'channel_failures': 0, 'dm_failed': 0}
+    summary = {'approved': 0, 'skipped_no_form': 0, 'role_failures': 0, 'channel_failures': 0, 'dm_failed': 0}
 
     approved_details = []
 
@@ -679,11 +679,6 @@ async def _bulk_approve_pending(bot, message, guild_settings, pending_role, admi
         # Skip members who haven't filled out the form
         if not application or not application.responses:
             summary['skipped_no_form'] += 1
-            continue
-
-        # Skip members whose application was already approved/rejected
-        if application.status != 'PENDING':
-            summary['skipped_already_reviewed'] += 1
             continue
 
         # Extract roles/channels from form responses
@@ -755,9 +750,7 @@ async def _bulk_approve_pending(bot, message, guild_settings, pending_role, admi
     # Build the report
     report_lines = [f"✅ **Bulk approve complete — {summary['approved']} approved**"]
     if summary['skipped_no_form']:
-        report_lines.append(f"⏭️ Skipped (no form): {summary['skipped_no_form']}")
-    if summary['skipped_already_reviewed']:
-        report_lines.append(f"⏭️ Skipped (already reviewed): {summary['skipped_already_reviewed']}")
+        report_lines.append(f"⏭️ Skipped (form not filled): {summary['skipped_no_form']}")
     if summary['role_failures']:
         report_lines.append(f"⚠️ Role failures: {summary['role_failures']}")
     if summary['channel_failures']:
