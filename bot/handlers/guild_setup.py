@@ -292,7 +292,7 @@ async def get_or_create_channel(guild, name, admin_role):
             overwrites = {
                 guild.default_role: discord.PermissionOverwrite(read_messages=False),
                 admin_role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-                guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+                guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, embed_links=True)
             }
             await channel.edit(overwrites=overwrites)
         except Exception:
@@ -303,7 +303,7 @@ async def get_or_create_channel(guild, name, admin_role):
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
         admin_role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-        guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, embed_links=True)
     }
     
     try:

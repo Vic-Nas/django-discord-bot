@@ -1,5 +1,6 @@
 import os
 import json
+import urllib.error
 import urllib.request
 
 from django.shortcuts import render, redirect
@@ -125,11 +126,15 @@ def _post_application_embed(guild_settings, application, fields):
     """Post the application embed to the #approvals channel via Discord REST API."""
     channel_id = guild_settings.approvals_channel_id
     if not channel_id:
+        print('\u274c No approvals_channel_id set — cannot post application embed')
         return
 
     token = os.environ.get('DISCORD_TOKEN')
     if not token:
+        print('\u274c DISCORD_TOKEN not set — cannot post application embed')
         return
+
+    print(f'\U0001f4e4 Posting application #{application.id} to channel {channel_id}')
 
     # Build responses text with name resolution
     responses_text = ''
@@ -143,12 +148,14 @@ def _post_application_embed(guild_settings, application, fields):
         'color': 16753920,  # orange
         'fields': [
             {'name': 'User', 'value': f'<@{application.user_id}>', 'inline': True},
-            {'name': 'Invite', 'value': application.invite_code, 'inline': True},
+            {'name': 'Invite', 'value': application.invite_code or 'N/A', 'inline': True},
             {'name': 'Invited by', 'value': application.inviter_name or 'Unknown', 'inline': True},
         ],
     }
 
     if responses_text:
+        if len(responses_text) > 1024:
+            responses_text = responses_text[:1021] + '...'
         embed['fields'].append({'name': 'Responses', 'value': responses_text, 'inline': False})
 
     embed['fields'].append({
@@ -168,6 +175,9 @@ def _post_application_embed(guild_settings, application, fields):
     })
     try:
         urllib.request.urlopen(req)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors='replace')
+        print(f'\u274c Failed to post application embed to Discord: {e} — {body}')
     except Exception as e:
         print(f'\u274c Failed to post application embed to Discord: {e}')
 
