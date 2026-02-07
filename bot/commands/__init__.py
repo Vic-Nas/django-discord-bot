@@ -76,12 +76,14 @@ class CommandRegistry:
         try:
             results = await execute_command_actions(bot, message, bot_cmd, guild_settings, args)
             
-            # Log results
+            # Log results and notify user of errors
             for success, status_msg in results:
+                print(f"   {status_msg}")
                 if not success:
-                    print(f"   {status_msg}")
-                else:
-                    print(f"   {status_msg}")
+                    # Extract the error message after "❌ action_name: "
+                    error_text = status_msg.split(': ', 1)[1] if ': ' in status_msg else status_msg
+                    tpl = await get_template_async(guild_settings, 'COMMAND_ERROR')
+                    await message.channel.send(tpl.format(message=error_text))
         
         except Exception as e:
             print(f"❌ Unexpected error executing {command_name}: {e}")
