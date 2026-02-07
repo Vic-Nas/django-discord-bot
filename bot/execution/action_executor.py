@@ -833,13 +833,13 @@ async def handle_approve_application(bot, message, params, args, guild_settings)
         ).order_by('-created_at').first()
     )()
 
-    # If no explicit @role mentions, extract roles/channels the user chose in their application form
+    # Always extract roles/channels the user chose in their application form and combine with explicit @role mentions
     channels_to_allow = []
-    if not explicit_roles and application and application.responses:
+    if application and application.responses:
         role_ids_from_form, channel_ids_from_form = await _extract_selections_from_application(guild_settings, application)
         for rid in role_ids_from_form:
             role = message.guild.get_role(rid)
-            if role:
+            if role and role not in explicit_roles:
                 explicit_roles.append(role)
         for cid in channel_ids_from_form:
             ch = message.guild.get_channel(cid)
