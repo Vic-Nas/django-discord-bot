@@ -707,21 +707,27 @@ async def handle_approve_application(bot, message, params, args, guild_settings)
 
     # Assign roles
     assigned_roles = []
+    failed_roles = []
     for role in explicit_roles:
         try:
             await member.add_roles(role)
             assigned_roles.append(role.name)
+        except discord.Forbidden:
+            failed_roles.append(role.name)
         except Exception:
-            pass
+            failed_roles.append(role.name)
 
     # Grant access to selected channels
     allowed_channels = []
+    failed_channels = []
     for ch in channels_to_allow:
         try:
             await ch.set_permissions(member, read_messages=True, send_messages=True)
             allowed_channels.append(f'#{ch.name}')
+        except discord.Forbidden:
+            failed_channels.append(f'#{ch.name}')
         except Exception:
-            pass
+            failed_channels.append(f'#{ch.name}')
 
     # Update application status
     if application:
@@ -742,10 +748,19 @@ async def handle_approve_application(bot, message, params, args, guild_settings)
     # Build confirmation summary
     parts = []
     if assigned_roles:
-        parts.append(f'Roles: {', '.join(assigned_roles)}')
+        parts.append(f'Roles: {", ".join(assigned_roles)}')
     if allowed_channels:
-        parts.append(f'Channels: {', '.join(allowed_channels)}')
+        parts.append(f'Channels: {", ".join(allowed_channels)}')
     summary = '. '.join(parts) if parts else 'No roles or channels assigned'
+
+    # Report failures
+    fail_parts = []
+    if failed_roles:
+        fail_parts.append(f'roles: {", ".join(failed_roles)}')
+    if failed_channels:
+        fail_parts.append(f'channels: {", ".join(failed_channels)}')
+    if fail_parts:
+        summary += f'\n⚠️ Failed (missing permissions): {"; ".join(fail_parts)}'
 
     template = await get_template_async(guild_settings, 'APPROVE_CONFIRM')
     confirm_msg = template.format(user=target_user.display_name, roles=summary)
