@@ -644,7 +644,7 @@ async def _extract_role_ids_from_application(guild_settings, application):
 
 
 async def handle_approve_application(bot, message, params, args, guild_settings):
-    """APPROVE_APPLICATION: Approve a user and assign roles. Usage: @Bot approve @user [role1,role2]"""
+    """APPROVE_APPLICATION: Approve a user and assign roles. Usage: @Bot approve @user [@role1 @role2 ...]"""
     from core.models import Application, DiscordRole, FormField
     from bot.handlers.templates import get_template_async
 
@@ -657,21 +657,19 @@ async def handle_approve_application(bot, message, params, args, guild_settings)
         raise ExecutionError("You need the **BotAdmin** role to use this command.")
 
     if len(args) < 1:
-        raise ExecutionError("Usage: `@Bot approve @user [role1,role2,...]`")
+        raise ExecutionError("Usage: `@Bot approve @user [@role ...]`")
 
     # Parse mentioned user
     if not message.mentions:
-        raise ExecutionError("Please mention the user to approve: `@Bot approve @user [role1,role2]`")
+        raise ExecutionError("Please mention the user to approve: `@Bot approve @user`")
 
     target_user = message.mentions[0]
     member = message.guild.get_member(target_user.id)
     if not member:
         raise ExecutionError(f"User {target_user.name} is not in this server.")
 
-    # Parse roles from args (second arg onwards, comma-separated)
-    role_names = []
-    if len(args) >= 2:
-        role_names = [r.strip() for r in ' '.join(args[1:]).split(',') if r.strip()]
+    # Collect roles from @role mentions in the message
+    explicit_roles = [r for r in message.role_mentions if r != admin_role]
 
     # Find the pending application
     application = await sync_to_async(
@@ -682,14 +680,13 @@ async def handle_approve_application(bot, message, params, args, guild_settings)
         ).order_by('-created_at').first()
     )()
 
-    # If no roles specified, extract roles the user chose in their application form
-    if not role_names and application and application.responses:
+    # If no explicit @role mentions, extract roles the user chose in their application form
+    if not explicit_roles and application and application.responses:
         role_ids_from_form = await _extract_role_ids_from_application(guild_settings, application)
-        role_names = []
         for rid in role_ids_from_form:
             role = message.guild.get_role(rid)
             if role:
-                role_names.append(role.name)
+                explicit_roles.append(role)
 
     # Remove Pending role
     if guild_settings.pending_role_id:
@@ -697,13 +694,14 @@ async def handle_approve_application(bot, message, params, args, guild_settings)
         if pending_role and pending_role in member.roles:
             await member.remove_roles(pending_role)
 
-    # Assign requested roles
+    # Assign roles
     assigned_roles = []
-    for rname in role_names:
-        role = discord.utils.get(message.guild.roles, name=rname)
-        if role:
+    for role in explicit_roles:
+        try:
             await member.add_roles(role)
             assigned_roles.append(role.name)
+        except Exception:
+            pass
 
     # Update application status
     if application:

@@ -161,7 +161,7 @@ def _post_application_embed(guild_settings, application, fields):
     embed['fields'].append({
         'name': 'Actions',
         'value': (
-            f'\u2705 **@Bot approve** <@{application.user_id}> [role1,role2]\n'
+            f'\u2705 **@Bot approve** <@{application.user_id}>\n'
             f'\u274c **@Bot reject** <@{application.user_id}> [reason]'
         ),
         'inline': False,

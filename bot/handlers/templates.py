@@ -81,7 +81,7 @@ Reason: {reason}""",
 **Responses:**
 {responses}
 
-✅ **@Bot approve** {user_mention} [role1,role2]
+✅ **@Bot approve** {user_mention}
 ❌ **@Bot reject** {user_mention} [reason]""",
 
     'GETACCESS_RESPONSE': """🔑 Access token for **{server}**:
