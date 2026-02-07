@@ -172,6 +172,7 @@ def _post_application_embed(guild_settings, application, fields):
     req = urllib.request.Request(url, data=data, headers={
         'Authorization': f'Bot {token}',
         'Content-Type': 'application/json',
+        'User-Agent': 'DiscordBot (https://github.com/Vic-Nas/django-discord-bot, 1.0)',
     })
     try:
         urllib.request.urlopen(req)
