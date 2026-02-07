@@ -183,7 +183,9 @@ async def send_form_link(bot, member, guild_settings, invite_data):
     )()
 
     # Build form URL
-    app_url = os.environ.get('APP_URL', 'https://your-domain.com')
+    app_url = os.environ.get('APP_URL', 'https://your-domain.com').rstrip('/')
+    if not app_url.startswith(('http://', 'https://')):
+        app_url = f'https://{app_url}'
     form_url = f"{app_url}/form/{guild_settings.guild_id}?user={member.id}&invite={invite_data['code']}"
 
     # Send in #pending channel
@@ -222,7 +224,7 @@ async def send_form_link(bot, member, guild_settings, invite_data):
     await pending_channel.send(
         f"👋 Welcome {member.mention}!\n\n"
         f"To complete your application for **{member.guild.name}**, please fill out the form:\n"
-        f"🔗 **{form_url}**\n\n"
+        f"🔗 [Application Form]({form_url})\n\n"
         f"The form will ask you about:\n{field_list}\n\n"
         f"Once submitted, an admin will review your application."
     )

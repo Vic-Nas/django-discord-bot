@@ -558,14 +558,16 @@ async def handle_generate_access_token(bot, message, params, guild_settings):
         ).first()
     )()
 
-    app_url = os.environ.get('APP_URL', 'https://your-domain.com')
+    app_url = os.environ.get('APP_URL', 'https://your-domain.com').rstrip('/')
+    if not app_url.startswith(('http://', 'https://')):
+        app_url = f'https://{app_url}'
 
     if existing:
         expires_str = existing.expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')
         access_url = f"{app_url}/access/{existing.token}"
         await message.author.send(
             f"🔑 You already have an active token for **{selected_guild.name}**:\n"
-            f"{access_url}\n"
+            f"[Admin Panel]({access_url})\n"
             f"Expires: {expires_str}"
         )
         return
@@ -586,7 +588,7 @@ async def handle_generate_access_token(bot, message, params, guild_settings):
     access_url = f"{app_url}/access/{token}"
     await message.author.send(
         f"🔑 Access token for **{selected_guild.name}**:\n"
-        f"{access_url}\n"
+        f"[Admin Panel]({access_url})\n"
         f"Expires: {expires_str}"
     )
 
