@@ -231,12 +231,11 @@ async def send_form_link(bot, member, guild_settings, invite_data):
         f"Once submitted, an admin will review your application."
     )
 
-    # Notify admins in #approvals
-    await post_application_for_review(bot, guild_settings, member, application, invite_data)
+    # Do NOT post to #approvals yet — that happens when the form is submitted on the web
 
 
 async def post_application_for_review(bot, guild_settings, member, application, invite_data):
-    """Post application to approvals channel for admin review"""
+    """Post application to approvals channel for admin review (used when no form fields exist)."""
     
     if not guild_settings.approvals_channel_id:
         return
@@ -245,13 +244,14 @@ async def post_application_for_review(bot, guild_settings, member, application, 
     if not channel:
         return
     
-    # Format responses
-    from core.models import FormField
+    # Format responses — resolve dropdown IDs to human-readable names
+    from core.models import FormField, DiscordRole, DiscordChannel
     fields = await sync_to_async(lambda: list(FormField.objects.select_related('dropdown').filter(guild=guild_settings).order_by('order')))()
     
     responses_text = ""
     for field in fields:
-        answer = application.responses.get(str(field.id), "No answer")
+        raw_answer = application.responses.get(str(field.id), "No answer")
+        answer = await sync_to_async(lambda f=field, v=raw_answer: _resolve_value(f, v))()
         responses_text += f"**{field.label}:** {answer}\n"
     
     inviter_name = invite_data.get('inviter_name') if isinstance(invite_data, dict) else 'Unknown'
@@ -284,6 +284,40 @@ async def post_application_for_review(bot, guild_settings, member, application, 
         inline=False
     )
     
-    msg = await channel.send(embed=embed)
-    await msg.add_reaction('✅')
-    await msg.add_reaction('❌')
+    await channel.send(embed=embed)
+
+
+def _resolve_value(field, raw_value):
+    """Resolve raw dropdown value to display name (sync helper)."""
+    from core.models import DiscordRole, DiscordChannel
+
+    if not raw_value or raw_value == 'No answer':
+        return raw_value
+    if field.field_type != 'dropdown' or not field.dropdown:
+        return raw_value
+
+    ids = [v.strip() for v in raw_value.split(',') if v.strip()]
+    source = field.dropdown.source_type
+
+    if source == 'ROLES':
+        names = []
+        for rid in ids:
+            try:
+                role = DiscordRole.objects.get(guild=field.guild, discord_id=int(rid))
+                names.append(role.name)
+            except (DiscordRole.DoesNotExist, ValueError):
+                names.append(rid)
+        return ', '.join(names)
+    elif source == 'CHANNELS':
+        names = []
+        for cid in ids:
+            try:
+                ch = DiscordChannel.objects.get(guild=field.guild, discord_id=int(cid))
+                names.append(f'#{ch.name}' if ch.name else cid)
+            except (DiscordChannel.DoesNotExist, ValueError):
+                names.append(cid)
+        return ', '.join(names)
+    elif source == 'CUSTOM':
+        option_map = {o.value: o.label for o in field.dropdown.custom_options.all()}
+        return ', '.join(option_map.get(v, v) for v in ids)
+    return raw_value

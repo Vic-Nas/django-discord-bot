@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Application Submitted — {{ guild_name }}</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            background: #313338;
+            color: #dbdee1;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 40px 16px;
+        }
+        .card {
+            background: #2b2d31;
+            border-radius: 8px;
+            padding: 40px 32px;
+            text-align: center;
+            max-width: 480px;
+            width: 100%;
+        }
+        .icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+        h1 {
+            font-size: 22px;
+            color: #f2f3f5;
+            margin-bottom: 8px;
+        }
+        p {
+            font-size: 15px;
+            color: #949ba4;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon">✅</div>
+        <h1>Application Submitted</h1>
+        <p>
+            Your application for <strong>{{ guild_name }}</strong> has been sent to the admins for review.
+            You'll receive a DM when a decision is made. You can close this page.
+        </p>
+    </div>
+</body>
+</html>

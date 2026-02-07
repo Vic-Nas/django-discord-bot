@@ -732,6 +732,18 @@ async def handle_reject_application(bot, message, params, args, guild_settings):
         application.reviewed_at = timezone.now()
         await sync_to_async(application.save)()
 
+    # Post rejection reason to #pending so the user can see it
+    if guild_settings.pending_channel_id:
+        pending_channel = bot.get_channel(guild_settings.pending_channel_id)
+        if pending_channel:
+            try:
+                await pending_channel.send(
+                    f"❌ {target_user.mention}, your application has been rejected.\n"
+                    f"**Reason:** {reason}"
+                )
+            except discord.Forbidden:
+                pass
+
     # Remove Pending role
     if member and guild_settings.pending_role_id:
         pending_role = message.guild.get_role(guild_settings.pending_role_id)
@@ -837,7 +849,7 @@ async def handle_reload_config(bot, message, params, guild_settings):
         await sync_to_async(DiscordChannel.objects.update_or_create)(
             discord_id=channel.id,
             guild=guild_settings,
-            defaults={}
+            defaults={'name': channel.name}
         )
     
     template = await get_template_async(guild_settings, 'COMMAND_SUCCESS')

@@ -18,6 +18,7 @@ urlpatterns = [
     path('healthz', views.health_check, name='healthz'),
     path('_health', views.health_check, name='alternate_health'),
     path('auth/login/', views.token_login, name='token_login'),
+    path('form/<int:guild_id>/', views.form_view, name='form'),
     path('', views.home, name='home'),
 ]
 

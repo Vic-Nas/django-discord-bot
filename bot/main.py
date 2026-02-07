@@ -116,16 +116,6 @@ async def on_message(message):
 
 
 @bot.event
-async def on_raw_reaction_add(payload):
-    """Handle reactions for application approval/rejection"""
-    if payload.user_id == bot.user.id:
-        return
-    
-    from bot.handlers.application_review import handle_reaction
-    await handle_reaction(bot, payload)
-
-
-@bot.event
 async def on_member_remove(member):
     """When a member leaves, cancel any PENDING application"""
     from core.models import Application

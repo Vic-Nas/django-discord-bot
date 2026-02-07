@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Application — {{ guild_name }}</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            background: #313338;
+            color: #dbdee1;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            padding: 40px 16px;
+        }
+        .container {
+            width: 100%;
+            max-width: 580px;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+        .header h1 {
+            font-size: 24px;
+            color: #f2f3f5;
+            margin-bottom: 6px;
+        }
+        .header p {
+            font-size: 14px;
+            color: #949ba4;
+        }
+        .card {
+            background: #2b2d31;
+            border-radius: 8px;
+            padding: 24px;
+        }
+        .field-group {
+            margin-bottom: 20px;
+        }
+        .field-group:last-of-type {
+            margin-bottom: 24px;
+        }
+        label.field-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: #b5bac1;
+            margin-bottom: 8px;
+            letter-spacing: 0.02em;
+        }
+        label.field-label .required {
+            color: #f23f42;
+            margin-left: 2px;
+        }
+        input[type="text"],
+        textarea,
+        select {
+            width: 100%;
+            padding: 10px 12px;
+            background: #1e1f22;
+            border: 1px solid #3f4147;
+            border-radius: 4px;
+            color: #dbdee1;
+            font-size: 15px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+        input[type="text"]:focus,
+        textarea:focus,
+        select:focus {
+            border-color: #5865f2;
+        }
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+        select {
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23b5bac1' d='M3.4 4.5L6 7.1l2.6-2.6'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            padding-right: 32px;
+            cursor: pointer;
+        }
+        select option {
+            background: #1e1f22;
+            color: #dbdee1;
+        }
+        .checkbox-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-size: 15px;
+        }
+        .checkbox-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: #5865f2;
+            cursor: pointer;
+        }
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .toggle-row input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            accent-color: #5865f2;
+            cursor: pointer;
+        }
+        .toggle-row span {
+            font-size: 15px;
+        }
+        button[type="submit"] {
+            width: 100%;
+            padding: 12px;
+            background: #5865f2;
+            color: #fff;
+            font-size: 15px;
+            font-weight: 600;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        button[type="submit"]:hover {
+            background: #4752c4;
+        }
+        button[type="submit"]:active {
+            background: #3c45a5;
+        }
+        .error-banner {
+            background: #f23f42;
+            color: #fff;
+            padding: 12px 16px;
+            border-radius: 4px;
+            margin-bottom: 16px;
+            font-size: 14px;
+        }
+        ::placeholder {
+            color: #6d6f78;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>{{ guild_name }}</h1>
+            <p>Fill out the form below to complete your application.</p>
+        </div>
+
+        {% if error %}
+        <div class="error-banner">{{ error }}</div>
+        {% endif %}
+
+        <div class="card">
+            <form method="post" action="?user={{ user_id }}&invite={{ invite_code }}">
+                {% for field in fields %}
+                <div class="field-group">
+                    <label class="field-label">
+                        {{ field.label }}
+                        {% if field.required %}<span class="required">*</span>{% endif %}
+                    </label>
+
+                    {% if field.field_type == 'text' %}
+                        <input type="text" name="field_{{ field.id }}"
+                               placeholder="{{ field.placeholder }}"
+                               {% if field.required %}required{% endif %}>
+
+                    {% elif field.field_type == 'textarea' %}
+                        <textarea name="field_{{ field.id }}"
+                                  placeholder="{{ field.placeholder }}"
+                                  {% if field.required %}required{% endif %}></textarea>
+
+                    {% elif field.field_type == 'dropdown' and field.multiselect %}
+                        <div class="checkbox-group">
+                            {% for opt in field.options %}
+                            <label class="checkbox-item">
+                                <input type="checkbox" name="field_{{ field.id }}" value="{{ opt.value }}">
+                                {{ opt.label }}
+                            </label>
+                            {% endfor %}
+                        </div>
+
+                    {% elif field.field_type == 'dropdown' %}
+                        <select name="field_{{ field.id }}" {% if field.required %}required{% endif %}>
+                            <option value="">— Select —</option>
+                            {% for opt in field.options %}
+                            <option value="{{ opt.value }}">{{ opt.label }}</option>
+                            {% endfor %}
+                        </select>
+
+                    {% elif field.field_type == 'checkbox' %}
+                        <div class="toggle-row">
+                            <input type="checkbox" id="field_{{ field.id }}" name="field_{{ field.id }}" value="Yes">
+                            <span>Yes</span>
+                        </div>
+
+                    {% endif %}
+                </div>
+                {% endfor %}
+
+                <input type="hidden" name="user_id" value="{{ user_id }}">
+                <input type="hidden" name="invite_code" value="{{ invite_code }}">
+                <button type="submit">Submit Application</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>
