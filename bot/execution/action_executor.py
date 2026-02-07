@@ -663,6 +663,8 @@ async def _bulk_approve_pending(bot, message, guild_settings, pending_role, admi
 
     summary = {'approved': 0, 'skipped_no_form': 0, 'skipped_already_reviewed': 0, 'role_failures': 0, 'channel_failures': 0, 'dm_failed': 0}
 
+    approved_details = []
+
     for member in members_with_pending:
         # Find the latest application for this member
         application = await sync_to_async(
@@ -672,8 +674,10 @@ async def _bulk_approve_pending(bot, message, guild_settings, pending_role, admi
             ).order_by('-created_at').first()
         )()
 
+        print(f"  Bulk approve check: {member.display_name} (ID={member.id}) — app={application.id if application else None}, status={application.status if application else None}, has_responses={bool(application.responses) if application else False}")
+
         # Skip members who haven't filled out the form
-        if not application:
+        if not application or not application.responses:
             summary['skipped_no_form'] += 1
             continue
 
@@ -703,16 +707,20 @@ async def _bulk_approve_pending(bot, message, guild_settings, pending_role, admi
             pass
 
         # Assign roles
+        member_assigned_roles = []
         for role in roles_to_assign:
             try:
                 await member.add_roles(role)
+                member_assigned_roles.append(role.name)
             except Exception:
                 summary['role_failures'] += 1
 
         # Grant channel access
+        member_channels = []
         for ch in channels_to_allow:
             try:
                 await ch.set_permissions(member, read_messages=True, send_messages=True)
+                member_channels.append(f'#{ch.name}')
             except Exception:
                 summary['channel_failures'] += 1
 
@@ -734,14 +742,52 @@ async def _bulk_approve_pending(bot, message, guild_settings, pending_role, admi
 
         summary['approved'] += 1
 
-    await approvals_channel.send(
-        f"✅ Bulk approve complete — **{summary['approved']}** members approved."
-        + (f" | Skipped (no form): {summary['skipped_no_form']}" if summary['skipped_no_form'] else "")
-        + (f" | Skipped (already reviewed): {summary['skipped_already_reviewed']}" if summary['skipped_already_reviewed'] else "")
-        + (f" | ⚠️ Role failures: {summary['role_failures']}" if summary['role_failures'] else "")
-        + (f" | ⚠️ Channel failures: {summary['channel_failures']}" if summary['channel_failures'] else "")
-        + (f" | DM failed: {summary['dm_failed']}" if summary['dm_failed'] else "")
-    )
+        # Track detail for this member
+        detail = f"• **{member.display_name}**"
+        if member_assigned_roles:
+            detail += f" → Roles: {', '.join(member_assigned_roles)}"
+        if member_channels:
+            detail += f" → Channels: {', '.join(member_channels)}"
+        if not member_assigned_roles and not member_channels:
+            detail += " → No roles/channels"
+        approved_details.append(detail)
+
+    # Build the report
+    report_lines = [f"✅ **Bulk approve complete — {summary['approved']} approved**"]
+    if summary['skipped_no_form']:
+        report_lines.append(f"⏭️ Skipped (no form): {summary['skipped_no_form']}")
+    if summary['skipped_already_reviewed']:
+        report_lines.append(f"⏭️ Skipped (already reviewed): {summary['skipped_already_reviewed']}")
+    if summary['role_failures']:
+        report_lines.append(f"⚠️ Role failures: {summary['role_failures']}")
+    if summary['channel_failures']:
+        report_lines.append(f"⚠️ Channel failures: {summary['channel_failures']}")
+    if summary['dm_failed']:
+        report_lines.append(f"📭 DM failed: {summary['dm_failed']}")
+
+    if approved_details:
+        report_lines.append("")
+        report_lines.append("**Details:**")
+        report_lines.extend(approved_details)
+
+    report = '\n'.join(report_lines)
+
+    # Discord has a 2000 char limit; split if needed
+    if len(report) <= 2000:
+        await approvals_channel.send(report)
+    else:
+        chunks = []
+        current = ""
+        for line in report_lines:
+            if len(current) + len(line) + 1 > 1900:
+                chunks.append(current)
+                current = line
+            else:
+                current = current + '\n' + line if current else line
+        if current:
+            chunks.append(current)
+        for chunk in chunks:
+            await approvals_channel.send(chunk)
 
 
 async def handle_approve_application(bot, message, params, args, guild_settings):
