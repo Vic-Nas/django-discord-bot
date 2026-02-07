@@ -564,7 +564,7 @@ async def handle_generate_access_token(bot, message, params, guild_settings):
 
     if existing:
         expires_str = existing.expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')
-        access_url = f"{app_url}/access/{existing.token}"
+        access_url = f"{app_url}/auth/login/?token={existing.token}"
         await message.author.send(
             f"🔑 You already have an active token for **{selected_guild.name}**:\n"
             f"[Admin Panel]({access_url})\n"
@@ -585,7 +585,7 @@ async def handle_generate_access_token(bot, message, params, guild_settings):
     )
 
     expires_str = expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')
-    access_url = f"{app_url}/access/{token}"
+    access_url = f"{app_url}/auth/login/?token={token}"
     await message.author.send(
         f"🔑 Access token for **{selected_guild.name}**:\n"
         f"[Admin Panel]({access_url})\n"
