@@ -661,21 +661,25 @@ async def _bulk_approve_pending(bot, message, guild_settings, pending_role, admi
 
     approvals_channel = message.guild.get_channel(guild_settings.approvals_channel_id) or message.channel
 
-    summary = {'approved': 0, 'skipped_no_form': 0, 'role_failures': 0, 'channel_failures': 0, 'dm_failed': 0}
+    summary = {'approved': 0, 'skipped_no_form': 0, 'skipped_already_reviewed': 0, 'role_failures': 0, 'channel_failures': 0, 'dm_failed': 0}
 
     for member in members_with_pending:
-        # Find pending application for this member
+        # Find the latest application for this member
         application = await sync_to_async(
             lambda uid=member.id: Application.objects.filter(
                 guild=guild_settings,
                 user_id=uid,
-                status='PENDING'
             ).order_by('-created_at').first()
         )()
 
         # Skip members who haven't filled out the form
         if not application:
             summary['skipped_no_form'] += 1
+            continue
+
+        # Skip members whose application was already approved/rejected
+        if application.status != 'PENDING':
+            summary['skipped_already_reviewed'] += 1
             continue
 
         # Extract roles/channels from form responses
@@ -733,6 +737,7 @@ async def _bulk_approve_pending(bot, message, guild_settings, pending_role, admi
     await approvals_channel.send(
         f"✅ Bulk approve complete — **{summary['approved']}** members approved."
         + (f" | Skipped (no form): {summary['skipped_no_form']}" if summary['skipped_no_form'] else "")
+        + (f" | Skipped (already reviewed): {summary['skipped_already_reviewed']}" if summary['skipped_already_reviewed'] else "")
         + (f" | ⚠️ Role failures: {summary['role_failures']}" if summary['role_failures'] else "")
         + (f" | ⚠️ Channel failures: {summary['channel_failures']}" if summary['channel_failures'] else "")
         + (f" | DM failed: {summary['dm_failed']}" if summary['dm_failed'] else "")
@@ -740,7 +745,7 @@ async def _bulk_approve_pending(bot, message, guild_settings, pending_role, admi
 
 
 async def handle_approve_application(bot, message, params, args, guild_settings):
-    """APPROVE_APPLICATION: Approve a user and assign roles. Usage: @Bot approve @user [@role1 @role2 ...] or @Bot approve @Pending"""
+    """APPROVE_APPLICATION: Approve a user and assign roles. Usage: @Bot approve @user [@role1 @role2 ...] or @Bot approve @Role"""
     from core.models import Application, DiscordRole, FormField
     from bot.handlers.templates import get_template_async
 
@@ -753,16 +758,15 @@ async def handle_approve_application(bot, message, params, args, guild_settings)
         raise ExecutionError("You need the **BotAdmin** role to use this command.")
 
     if len(args) < 1:
-        raise ExecutionError("Usage: `@Bot approve @user [@role ...]` or `@Bot approve @Pending`")
+        raise ExecutionError("Usage: `@Bot approve @user [@role ...]` or `@Bot approve @Role`")
 
-    # Check if @Pending role was mentioned → bulk approve all members with that role
-    pending_role = message.guild.get_role(guild_settings.pending_role_id) if guild_settings.pending_role_id else None
-    if pending_role and pending_role in message.role_mentions:
-        await _bulk_approve_pending(bot, message, guild_settings, pending_role, admin_role)
-        return
-
-    # Parse mentioned user (filter out the bot itself from mentions)
+    # Check if a role was mentioned with no user mentions → bulk approve members with that role
     user_mentions = [u for u in message.mentions if u.id != bot.user.id]
+    non_admin_role_mentions = [r for r in message.role_mentions if r != admin_role]
+    if not user_mentions and non_admin_role_mentions:
+        target_role = non_admin_role_mentions[0]
+        await _bulk_approve_pending(bot, message, guild_settings, target_role, admin_role)
+        return
     if not user_mentions:
         raise ExecutionError("Please mention the user to approve: `@Bot approve @user`")
 
