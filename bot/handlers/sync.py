@@ -6,9 +6,8 @@ from asgiref.sync import sync_to_async
 async def sync_guild_data(bot, guild_id):
     """
     Sync Discord roles/channels with database.
-    - Update names
-    - Mark deleted items
-    - Don't delete anything from DB
+    - Update names for roles
+    - Remove stale DB entries for deleted Discord resources
     """
     
     try:
@@ -26,7 +25,7 @@ async def sync_guild_data(bot, guild_id):
     
     # Sync roles
     roles_synced = 0
-    roles_marked_deleted = 0
+    roles_removed = 0
     
     discord_role_ids = {role.id for role in guild.roles}
     db_roles = await sync_to_async(lambda: list(DiscordRole.objects.filter(guild=guild_settings)))()
@@ -35,54 +34,71 @@ async def sync_guild_data(bot, guild_id):
         if db_role.discord_id in discord_role_ids:
             # Update name
             discord_role = guild.get_role(db_role.discord_id)
-            if discord_role:
+            if discord_role and db_role.name != discord_role.name:
                 db_role.name = discord_role.name
-                db_role.is_deleted = False
                 await sync_to_async(db_role.save)()
-                roles_synced += 1
+            roles_synced += 1
         else:
-            # Mark as deleted
-            if not db_role.is_deleted:
-                db_role.is_deleted = True
-                await sync_to_async(db_role.save)()
-                roles_marked_deleted += 1
+            # Role was deleted on Discord — remove from DB
+            await sync_to_async(db_role.delete)()
+            roles_removed += 1
+    
+    # Add new roles not yet in DB
+    roles_added = 0
+    for role in guild.roles:
+        if role.is_default():
+            continue
+        exists = await sync_to_async(
+            lambda r=role: DiscordRole.objects.filter(discord_id=r.id, guild=guild_settings).exists()
+        )()
+        if not exists:
+            await sync_to_async(DiscordRole.objects.create)(
+                discord_id=role.id,
+                guild=guild_settings,
+                name=role.name
+            )
+            roles_added += 1
     
     # Sync channels
     channels_synced = 0
-    channels_marked_deleted = 0
+    channels_removed = 0
     
     discord_channel_ids = {channel.id for channel in guild.channels}
     db_channels = await sync_to_async(lambda: list(DiscordChannel.objects.filter(guild=guild_settings)))()
     
     for db_channel in db_channels:
         if db_channel.discord_id in discord_channel_ids:
-            # Update name
-            discord_channel = guild.get_channel(db_channel.discord_id)
-            if discord_channel:
-                db_channel.name = discord_channel.name
-                db_channel.is_deleted = False
-                await sync_to_async(db_channel.save)()
-                channels_synced += 1
+            channels_synced += 1
         else:
-            # Mark as deleted
-            if not db_channel.is_deleted:
-                db_channel.is_deleted = True
-                await sync_to_async(db_channel.save)()
-                channels_marked_deleted += 1
+            # Channel was deleted on Discord — remove from DB
+            await sync_to_async(db_channel.delete)()
+            channels_removed += 1
+    
+    # Add new channels not yet in DB
+    channels_added = 0
+    for channel in guild.text_channels:
+        exists = await sync_to_async(
+            lambda c=channel: DiscordChannel.objects.filter(discord_id=c.id, guild=guild_settings).exists()
+        )()
+        if not exists:
+            await sync_to_async(DiscordChannel.objects.create)(
+                discord_id=channel.id,
+                guild=guild_settings
+            )
+            channels_added += 1
     
     # Build report
     report = f"""✅ **Sync Complete**
 
 **Roles:**
-- Updated: {roles_synced}
-- Marked as deleted: {roles_marked_deleted}
+- Synced: {roles_synced}
+- Added: {roles_added}
+- Removed (deleted on Discord): {roles_removed}
 
 **Channels:**
-- Updated: {channels_synced}
-- Marked as deleted: {channels_marked_deleted}
+- Synced: {channels_synced}
+- Added: {channels_added}
+- Removed (deleted on Discord): {channels_removed}
 """
-    
-    if roles_marked_deleted > 0 or channels_marked_deleted > 0:
-        report += "\n⚠️ Some resources were marked as deleted. Check the admin panel to resolve conflicts."
     
     return report

@@ -19,7 +19,7 @@ import os
 import asyncio
 import pytest
 import discord
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from django.test import TestCase
 from asgiref.sync import sync_to_async
 from core.models import GuildSettings, BotCommand, InviteRule, FormField, AccessToken, Application
@@ -68,6 +68,15 @@ class TestHandlersWithRealGuild:
             defaults={'guild_name': f'Test-{self.guild.name}'}
         )
         
+        # Pick a real role to use as BotAdmin for admin-gated tests
+        non_managed_roles = [r for r in self.guild.roles if not r.is_bot_managed() and not r.is_default()]
+        if non_managed_roles:
+            self.admin_role = non_managed_roles[0]
+            self.guild_settings.bot_admin_role_id = self.admin_role.id
+            await sync_to_async(self.guild_settings.save)()
+        else:
+            self.admin_role = None
+        
         yield
     
     @pytest.mark.asyncio
@@ -81,12 +90,13 @@ class TestHandlersWithRealGuild:
         
         test_role = test_roles[0]
         
-        # Create mock message with REAL guild object
+        # Create mock message with REAL guild object and BotAdmin role
         message = AsyncMock()
         message.guild = self.guild  # Real Discord guild - already has roles
         message.channel = AsyncMock()
-        message.author = AsyncMock()
+        message.author = MagicMock()
         message.author.id = 999999999999999999
+        message.author.roles = [self.admin_role] if self.admin_role else []
         
         # Test handler with real data
         params = {}
@@ -116,7 +126,10 @@ class TestHandlersWithRealGuild:
         )
         
         message = AsyncMock()
+        message.guild = self.guild
         message.channel = AsyncMock()
+        message.author = MagicMock()
+        message.author.roles = [self.admin_role] if self.admin_role else []
         
         params = {}
         args = ['ruleto_delete']
@@ -198,9 +211,10 @@ class TestHandlersWithRealGuild:
         message = AsyncMock()
         message.guild = mock_guild
         message.channel = AsyncMock()
-        message.author = AsyncMock()
+        message.author = MagicMock()
         message.author.id = 999999999999999999
         message.author.name = 'TestAdmin'
+        message.author.roles = [self.admin_role] if self.admin_role else []
         message.mentions = [target_user]
 
         args = [f'<@{target_user.id}>', test_roles[0].name]
@@ -329,6 +343,8 @@ class TestHandlersWithRealGuild:
         message = AsyncMock()
         message.guild = self.guild  # Use real guild
         message.channel = AsyncMock()
+        message.author = MagicMock()
+        message.author.roles = [self.admin_role] if self.admin_role else []
         
         params = {}
         args = ['AUTO']
@@ -340,6 +356,11 @@ class TestHandlersWithRealGuild:
             guild_id=self.guild_settings.guild_id
         )
         assert updated_settings.mode == 'AUTO'
+        
+        # Pre-set channel IDs so APPROVAL mode doesn't try to create real channels
+        self.guild_settings.approvals_channel_id = 123456789
+        self.guild_settings.pending_channel_id = 987654321
+        await sync_to_async(self.guild_settings.save)()
         
         # Test APPROVAL mode
         args = ['APPROVAL']
@@ -383,10 +404,14 @@ class TestHandlersWithRealGuild:
     async def test_reload_config(self):
         """Test reloading bot configuration"""
         message = AsyncMock()
+        message.guild = self.guild
         message.channel = AsyncMock()
+        message.author = MagicMock()
+        message.author.roles = [self.admin_role] if self.admin_role else []
         
-        # Should execute without errors
-        await handle_reload_config(self.bot, message, {}, self.guild_settings)
+        # Mock ensure_required_resources to avoid real Discord API calls
+        with patch('bot.handlers.guild_setup.ensure_required_resources', new_callable=AsyncMock):
+            await handle_reload_config(self.bot, message, {}, self.guild_settings)
         
         # Verify send was called
         assert message.channel.send.called

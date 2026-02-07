@@ -121,8 +121,24 @@ async def on_raw_reaction_add(payload):
     if payload.user_id == bot.user.id:
         return
     
-    from handlers.application_review import handle_reaction
+    from bot.handlers.application_review import handle_reaction
     await handle_reaction(bot, payload)
+
+
+@bot.event
+async def on_member_remove(member):
+    """When a member leaves, cancel any PENDING application"""
+    from core.models import Application
+    try:
+        await sync_to_async(
+            lambda: Application.objects.filter(
+                guild__guild_id=member.guild.id,
+                user_id=member.id,
+                status='PENDING'
+            ).update(status='REJECTED')
+        )()
+    except Exception as e:
+        print(f'⚠️ Error updating application on member leave: {e}')
 
 
 if __name__ == '__main__':

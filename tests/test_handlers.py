@@ -50,6 +50,30 @@ class TestActionHandlers(TestCase):
         """Clean up test data"""
         self.guild_settings.delete()
     
+    def _make_message_with_admin(self):
+        """Create a mock message where author has BotAdmin role"""
+        message = AsyncMock()
+        message.guild = AsyncMock()
+        message.channel = AsyncMock()
+        
+        # BotAdmin role mock
+        bot_admin_role = MagicMock()
+        bot_admin_role.id = self.guild_settings.bot_admin_role_id
+        bot_admin_role.name = 'BotAdmin'
+        
+        # Author has BotAdmin role
+        message.author = MagicMock()
+        message.author.roles = [bot_admin_role]
+        
+        # guild.get_role returns the admin role when asked for bot_admin_role_id
+        def get_role_side_effect(role_id):
+            if role_id == self.guild_settings.bot_admin_role_id:
+                return bot_admin_role
+            return None
+        message.guild.get_role = MagicMock(side_effect=get_role_side_effect)
+        
+        return message, bot_admin_role
+    
     @pytest.mark.asyncio
     async def test_add_invite_rule_success(self):
         """Test adding an invite rule"""
@@ -65,9 +89,8 @@ class TestActionHandlers(TestCase):
             name='Member'
         )
         
-        # Mock Discord objects
-        message = AsyncMock()
-        message.guild = AsyncMock()
+        # Mock Discord objects with BotAdmin
+        message, bot_admin_role = self._make_message_with_admin()
         
         # Create proper mock Discord roles that have .name attribute
         discord_admin = MagicMock()
@@ -78,9 +101,15 @@ class TestActionHandlers(TestCase):
         discord_member.name = 'Member'
         discord_member.id = 222222222222222222
         
-        message.guild.roles = [discord_admin, discord_member]
-        message.guild.get_role = MagicMock(return_value=discord_admin)
-        message.channel = AsyncMock()
+        message.guild.roles = [bot_admin_role, discord_admin, discord_member]
+        # Override get_role to also return the admin role for admin_role_id
+        def get_role(role_id):
+            if role_id == self.guild_settings.bot_admin_role_id:
+                return bot_admin_role
+            if role_id == 111111111111111111:
+                return discord_admin
+            return None
+        message.guild.get_role = MagicMock(side_effect=get_role)
         
         bot = AsyncMock()
         
@@ -106,16 +135,14 @@ class TestActionHandlers(TestCase):
     @pytest.mark.asyncio
     async def test_add_invite_rule_invalid_role(self):
         """Test adding rule with non-existent role"""
-        message = AsyncMock()
-        message.guild = AsyncMock()
+        message, bot_admin_role = self._make_message_with_admin()
         
         # Create a role that exists in Discord but not the one we're asking for
         discord_admin = MagicMock()
         discord_admin.name = 'Admin'
         discord_admin.id = 111111111111111111
         
-        message.guild.roles = [discord_admin]
-        message.channel = AsyncMock()
+        message.guild.roles = [bot_admin_role, discord_admin]
         
         bot = AsyncMock()
         params = {}
@@ -134,8 +161,7 @@ class TestActionHandlers(TestCase):
             invite_code='todelete'
         )
         
-        message = AsyncMock()
-        message.channel = AsyncMock()
+        message, _ = self._make_message_with_admin()
         bot = AsyncMock()
         
         params = {}
@@ -156,8 +182,7 @@ class TestActionHandlers(TestCase):
     @pytest.mark.asyncio
     async def test_delete_nonexistent_rule(self):
         """Test deleting a rule that doesn't exist"""
-        message = AsyncMock()
-        message.channel = AsyncMock()
+        message, _ = self._make_message_with_admin()
         bot = AsyncMock()
         
         params = {}

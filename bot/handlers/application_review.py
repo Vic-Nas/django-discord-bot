@@ -27,7 +27,8 @@ async def handle_reaction(bot, payload):
     
     # Extract application ID
     try:
-        app_id = int(message.embeds[0].title.split('#')[1])
+        title_part = message.embeds[0].title.split('#')[1]
+        app_id = int(title_part.split()[0].strip(' ——-'))
     except:
         return
     
@@ -38,7 +39,7 @@ async def handle_reaction(bot, payload):
         return
     
     # Get guild settings
-    guild_settings = application.guild
+    guild_settings = await sync_to_async(lambda: application.guild)()
     
     # Check if user has BotAdmin role
     guild = bot.get_guild(guild_settings.guild_id)
@@ -52,7 +53,10 @@ async def handle_reaction(bot, payload):
     admin_role = guild.get_role(guild_settings.bot_admin_role_id)
     if not admin_role or admin_role not in member.roles:
         # Remove reaction if not admin
-        await message.remove_reaction(payload.emoji, member)
+        try:
+            await message.remove_reaction(payload.emoji, member)
+        except:
+            pass
         return
     
     # Get the applicant
@@ -71,31 +75,35 @@ async def handle_reaction(bot, payload):
 async def approve_application(bot, application, applicant, admin, message):
     """Approve application and assign roles"""
     
-    guild_settings = application.guild
+    guild_settings = await sync_to_async(lambda: application.guild)()
     guild = applicant.guild
     
     # Update application status
     application.status = 'APPROVED'
     application.reviewed_by = admin.id
     application.reviewed_at = timezone.now()
-    application.save()
+    await sync_to_async(application.save)()
     
     # Get rule for the invite code
     try:
-        rule = InviteRule.objects.prefetch_related('roles').get(
-            guild=guild_settings,
-            invite_code=application.invite_code
-        )
+        rule = await sync_to_async(
+            lambda: InviteRule.objects.prefetch_related('roles').get(
+                guild=guild_settings,
+                invite_code=application.invite_code
+            )
+        )()
     except InviteRule.DoesNotExist:
         # Try default rule
         try:
-            rule = InviteRule.objects.prefetch_related('roles').get(
-                guild=guild_settings,
-                invite_code='default'
-            )
+            rule = await sync_to_async(
+                lambda: InviteRule.objects.prefetch_related('roles').get(
+                    guild=guild_settings,
+                    invite_code='default'
+                )
+            )()
         except InviteRule.DoesNotExist:
             await message.channel.send(f"⚠️ No rule found for invite `{application.invite_code}` and no default rule.")
-            return
+            rule = None
     
     # Remove Pending role
     pending_role = guild.get_role(guild_settings.pending_role_id)
@@ -109,11 +117,12 @@ async def approve_application(bot, application, applicant, admin, message):
     roles_to_assign = []
     role_names = []
     
-    for db_role in rule.roles.filter(is_deleted=False):
-        discord_role = guild.get_role(db_role.discord_id)
-        if discord_role:
-            roles_to_assign.append(discord_role)
-            role_names.append(discord_role.name)
+    if rule:
+        for db_role in await sync_to_async(lambda: list(rule.roles.all()))():
+            discord_role = guild.get_role(db_role.discord_id)
+            if discord_role:
+                roles_to_assign.append(discord_role)
+                role_names.append(discord_role.name)
     
     if roles_to_assign:
         try:
@@ -146,9 +155,9 @@ async def approve_application(bot, application, applicant, admin, message):
 
 
 async def reject_application(bot, application, applicant, admin, message):
-    """Reject application"""
+    """Reject application and remove Pending role"""
     
-    guild_settings = application.guild
+    guild_settings = await sync_to_async(lambda: application.guild)()
     guild = applicant.guild
     
     # Update application status
@@ -156,6 +165,14 @@ async def reject_application(bot, application, applicant, admin, message):
     application.reviewed_by = admin.id
     application.reviewed_at = timezone.now()
     await sync_to_async(application.save)()
+    
+    # Remove Pending role
+    pending_role = guild.get_role(guild_settings.pending_role_id)
+    if pending_role and pending_role in applicant.roles:
+        try:
+            await applicant.remove_roles(pending_role)
+        except:
+            pass
     
     # Update embed
     embed = message.embeds[0]
@@ -175,8 +192,5 @@ async def reject_application(bot, application, applicant, admin, message):
         await applicant.send(dm_message)
     except:
         pass
-    
-    # Optionally kick the user
-    # await applicant.kick(reason=f'Application rejected by {admin.name}')
     
     print(f'❌ Application #{application.id} rejected by {admin.name}')

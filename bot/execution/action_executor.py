@@ -348,6 +348,11 @@ async def handle_add_invite_rule(bot, message, params, args, guild_settings):
     """ADD_INVITE_RULE: Add an invite code -> roles mapping"""
     from core.models import InviteRule, DiscordRole
     from bot.handlers.templates import get_template_async
+
+    # Check BotAdmin permission
+    admin_role = message.guild.get_role(guild_settings.bot_admin_role_id)
+    if not admin_role or admin_role not in message.author.roles:
+        raise ExecutionError("You need the **BotAdmin** role to use this command.")
     
     if len(args) < 2:
         raise ExecutionError("Usage: `@Bot addrule <invite_code> <role1,role2,...> [description]`")
@@ -398,6 +403,11 @@ async def handle_delete_invite_rule(bot, message, params, args, guild_settings):
     """DELETE_INVITE_RULE: Remove an invite rule"""
     from core.models import InviteRule
     from bot.handlers.templates import get_template_async
+
+    # Check BotAdmin permission
+    admin_role = message.guild.get_role(guild_settings.bot_admin_role_id)
+    if not admin_role or admin_role not in message.author.roles:
+        raise ExecutionError("You need the **BotAdmin** role to use this command.")
     
     if len(args) < 1:
         raise ExecutionError("Usage: `@Bot delrule <invite_code>`")
@@ -455,6 +465,11 @@ async def handle_set_server_mode(bot, message, params, args, guild_settings):
     
     if mode not in ['AUTO', 'APPROVAL']:
         raise ExecutionError("Mode must be AUTO or APPROVAL")
+
+    # Check BotAdmin permission
+    admin_role = message.guild.get_role(guild_settings.bot_admin_role_id)
+    if not admin_role or admin_role not in message.author.roles:
+        raise ExecutionError("You need the **BotAdmin** role to use this command.")
     
     old_mode = guild_settings.mode
     guild_settings.mode = mode
@@ -612,6 +627,11 @@ async def handle_approve_application(bot, message, params, args, guild_settings)
     if not message.guild:
         raise ExecutionError("This command can only be used in a server.")
 
+    # Check BotAdmin permission
+    admin_role = message.guild.get_role(guild_settings.bot_admin_role_id)
+    if not admin_role or admin_role not in message.author.roles:
+        raise ExecutionError("You need the **BotAdmin** role to use this command.")
+
     if len(args) < 1:
         raise ExecutionError("Usage: `@Bot approve @user [role1,role2,...]`")
 
@@ -682,6 +702,10 @@ async def handle_reject_application(bot, message, params, args, guild_settings):
     if not message.guild:
         raise ExecutionError("This command can only be used in a server.")
 
+    # Check BotAdmin permission
+    admin_role = message.guild.get_role(guild_settings.bot_admin_role_id)
+    if not admin_role or admin_role not in message.author.roles:
+        raise ExecutionError("You need the **BotAdmin** role to use this command.")
     if len(args) < 1:
         raise ExecutionError("Usage: `@Bot reject @user [reason]`")
 
@@ -707,6 +731,15 @@ async def handle_reject_application(bot, message, params, args, guild_settings):
         application.reviewed_by = message.author.id
         application.reviewed_at = timezone.now()
         await sync_to_async(application.save)()
+
+    # Remove Pending role
+    if member and guild_settings.pending_role_id:
+        pending_role = message.guild.get_role(guild_settings.pending_role_id)
+        if pending_role and pending_role in member.roles:
+            try:
+                await member.remove_roles(pending_role)
+            except discord.Forbidden:
+                pass
 
     # Notify the user
     try:
@@ -755,9 +788,21 @@ async def handle_list_form_fields(bot, message, params, guild_settings):
 
 
 async def handle_reload_config(bot, message, params, guild_settings):
-    """RELOAD_CONFIG: Sync roles and channels with Discord"""
+    """RELOAD_CONFIG: Sync roles and channels with Discord, ensure resources exist"""
     from core.models import DiscordRole, DiscordChannel
     from bot.handlers.templates import get_template_async
+    from bot.handlers.guild_setup import ensure_required_resources
+
+    # Check BotAdmin permission
+    admin_role = message.guild.get_role(guild_settings.bot_admin_role_id)
+    if not admin_role or admin_role not in message.author.roles:
+        raise ExecutionError("You need the **BotAdmin** role to use this command.")
+
+    # Ensure all required resources exist (creates missing channels/roles)
+    await ensure_required_resources(bot, guild_settings)
+    # Refresh guild_settings after ensure_required_resources may have saved
+    from core.models import GuildSettings
+    guild_settings = await sync_to_async(GuildSettings.objects.get)(guild_id=guild_settings.guild_id)
     
     # Sync all roles
     roles = message.guild.roles
@@ -778,5 +823,5 @@ async def handle_reload_config(bot, message, params, guild_settings):
         )
     
     template = await get_template_async(guild_settings, 'COMMAND_SUCCESS')
-    msg = template.format(message=f"Reloaded configuration ({len(roles)} roles, {len(channels)} channels)")
+    msg = template.format(message=f"Reloaded configuration ({len(roles)} roles, {len(channels)} channels). All resources verified.")
     await message.channel.send(msg)
