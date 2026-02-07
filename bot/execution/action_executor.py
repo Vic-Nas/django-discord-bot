@@ -459,19 +459,30 @@ async def handle_set_server_mode(bot, message, params, args, guild_settings):
     old_mode = guild_settings.mode
     guild_settings.mode = mode
     
-    # If switching to APPROVAL mode, create approvals channel
-    if mode == 'APPROVAL' and not guild_settings.approvals_channel_id:
-        admin_role = message.guild.get_role(guild_settings.bot_admin_role_id)
+    # If switching to APPROVAL mode, create approvals + pending channels
+    if mode == 'APPROVAL':
+        if not guild_settings.approvals_channel_id:
+            admin_role = message.guild.get_role(guild_settings.bot_admin_role_id)
+            if admin_role:
+                approvals_channel = await get_or_create_channel(message.guild, "approvals", admin_role)
+                guild_settings.approvals_channel_id = approvals_channel.id
+                await sync_to_async(DiscordChannel.objects.update_or_create)(
+                    discord_id=approvals_channel.id,
+                    guild=guild_settings,
+                    defaults={}
+                )
         
-        if admin_role:
-            approvals_channel = await get_or_create_channel(message.guild, "approvals", admin_role)
-            guild_settings.approvals_channel_id = approvals_channel.id
-            
-            await sync_to_async(DiscordChannel.objects.update_or_create)(
-                discord_id=approvals_channel.id,
-                guild=guild_settings,
-                defaults={}
-            )
+        if not guild_settings.pending_channel_id:
+            from bot.handlers.guild_setup import get_or_create_pending_channel
+            pending_role = message.guild.get_role(guild_settings.pending_role_id)
+            if pending_role:
+                pending_channel = await get_or_create_pending_channel(message.guild, pending_role)
+                guild_settings.pending_channel_id = pending_channel.id
+                await sync_to_async(DiscordChannel.objects.update_or_create)(
+                    discord_id=pending_channel.id,
+                    guild=guild_settings,
+                    defaults={}
+                )
     
     await sync_to_async(guild_settings.save)()
     template = await get_template_async(guild_settings, 'COMMAND_SUCCESS')

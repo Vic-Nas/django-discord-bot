@@ -198,18 +198,11 @@ async def send_form_link(bot, member, guild_settings, invite_data):
         print(f'⚠️ No #pending channel found for {member.guild.name}')
         return
 
-    if not fields:
-        await pending_channel.send(
-            f"👋 Welcome {member.mention}! No application form is configured yet. "
-            f"Please wait for an admin to review your join request."
-        )
-        return
-
-    # Save a preliminary application record so we can track the invite
+    # Always create an Application record to track the member
     inviter_id = invite_data['inviter'].id if invite_data['inviter'] else None
     inviter_name = invite_data['inviter'].name if invite_data['inviter'] else 'Unknown'
 
-    await sync_to_async(Application.objects.create)(
+    application = await sync_to_async(Application.objects.create)(
         guild=guild_settings,
         user_id=member.id,
         user_name=str(member),
@@ -220,6 +213,15 @@ async def send_form_link(bot, member, guild_settings, invite_data):
         responses={}
     )
 
+    if not fields:
+        await pending_channel.send(
+            f"👋 Welcome {member.mention}! No application form is configured yet. "
+            f"Please wait for an admin to review your join request."
+        )
+        # Still notify admins in #approvals
+        await post_application_for_review(bot, guild_settings, member, application, invite_data)
+        return
+
     field_list = '\n'.join([f"• {f.label}" for f in fields])
     await pending_channel.send(
         f"👋 Welcome {member.mention}!\n\n"
@@ -228,6 +230,9 @@ async def send_form_link(bot, member, guild_settings, invite_data):
         f"The form will ask you about:\n{field_list}\n\n"
         f"Once submitted, an admin will review your application."
     )
+
+    # Notify admins in #approvals
+    await post_application_for_review(bot, guild_settings, member, application, invite_data)
 
 
 async def post_application_for_review(bot, guild_settings, member, application, invite_data):

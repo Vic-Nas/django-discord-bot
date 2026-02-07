@@ -72,6 +72,16 @@ async def setup_guild(bot, guild):
         defaults={}
     )
     
+    # Create #approvals channel (private, BotAdmin only)
+    approvals_channel = await get_or_create_channel(guild, "approvals", bot_admin_role)
+    guild_settings.approvals_channel_id = approvals_channel.id
+    
+    await sync_to_async(DiscordChannel.objects.update_or_create)(
+        discord_id=approvals_channel.id,
+        guild=guild_settings,
+        defaults={}
+    )
+    
     # Create #pending channel (visible ONLY to Pending role + bot)
     pending_channel = await get_or_create_pending_channel(guild, pending_role)
     guild_settings.pending_channel_id = pending_channel.id
@@ -323,83 +333,83 @@ async def ensure_required_resources(bot, guild_settings):
     """
     Ensure required roles/channels exist.
     Called when needed (e.g., before role assignment).
-    Recreates if deleted.
+    Creates if missing or if ID was never set.
     """
     guild = bot.get_guild(guild_settings.guild_id)
     if not guild:
         return
     
+    changed = False
+    
     # Check BotAdmin role
+    bot_admin_role = None
     if guild_settings.bot_admin_role_id:
-        role = guild.get_role(guild_settings.bot_admin_role_id)
-        if not role:
-            # Recreate
-            role = await get_or_create_role(guild, "BotAdmin", color=discord.Color.blue())
-            guild_settings.bot_admin_role_id = role.id
-            await sync_to_async(guild_settings.save)()
-            
-            await sync_to_async(DiscordRole.objects.update_or_create)(
-                discord_id=role.id,
-                guild=guild_settings,
-                defaults={'name': role.name}
-            )
+        bot_admin_role = guild.get_role(guild_settings.bot_admin_role_id)
+    if not bot_admin_role:
+        bot_admin_role = await get_or_create_role(guild, "BotAdmin", color=discord.Color.blue())
+        guild_settings.bot_admin_role_id = bot_admin_role.id
+        changed = True
+        await sync_to_async(DiscordRole.objects.update_or_create)(
+            discord_id=bot_admin_role.id,
+            guild=guild_settings,
+            defaults={'name': bot_admin_role.name}
+        )
     
     # Check Pending role
+    pending_role = None
     if guild_settings.pending_role_id:
-        role = guild.get_role(guild_settings.pending_role_id)
-        if not role:
-            role = await get_or_create_role(guild, "Pending", color=discord.Color.orange())
-            guild_settings.pending_role_id = role.id
-            await sync_to_async(guild_settings.save)()
-            
-            await sync_to_async(DiscordRole.objects.update_or_create)(
-                discord_id=role.id,
-                guild=guild_settings,
-                defaults={'name': role.name}
-            )
+        pending_role = guild.get_role(guild_settings.pending_role_id)
+    if not pending_role:
+        pending_role = await get_or_create_role(guild, "Pending", color=discord.Color.orange())
+        guild_settings.pending_role_id = pending_role.id
+        changed = True
+        await sync_to_async(DiscordRole.objects.update_or_create)(
+            discord_id=pending_role.id,
+            guild=guild_settings,
+            defaults={'name': pending_role.name}
+        )
     
     # Check bounce channel
+    bounce_channel = None
     if guild_settings.logs_channel_id:
-        channel = guild.get_channel(guild_settings.logs_channel_id)
-        if not channel:
-            admin_role = guild.get_role(guild_settings.bot_admin_role_id)
-            channel = await get_or_create_channel(guild, "bounce", admin_role)
-            guild_settings.logs_channel_id = channel.id
-            await sync_to_async(guild_settings.save)()
-            
-            await sync_to_async(DiscordChannel.objects.update_or_create)(
-                discord_id=channel.id,
-                guild=guild_settings,
-                defaults={}
-            )
+        bounce_channel = guild.get_channel(guild_settings.logs_channel_id)
+    if not bounce_channel:
+        bounce_channel = await get_or_create_channel(guild, "bounce", bot_admin_role)
+        guild_settings.logs_channel_id = bounce_channel.id
+        changed = True
+        await sync_to_async(DiscordChannel.objects.update_or_create)(
+            discord_id=bounce_channel.id,
+            guild=guild_settings,
+            defaults={}
+        )
     
-    # Check approvals channel if in APPROVAL mode
-    if guild_settings.mode == 'APPROVAL' and guild_settings.approvals_channel_id:
-        channel = guild.get_channel(guild_settings.approvals_channel_id)
-        if not channel:
-            admin_role = guild.get_role(guild_settings.bot_admin_role_id)
-            channel = await get_or_create_channel(guild, "approvals", admin_role)
-            guild_settings.approvals_channel_id = channel.id
-            await sync_to_async(guild_settings.save)()
-            
-            await sync_to_async(DiscordChannel.objects.update_or_create)(
-                discord_id=channel.id,
-                guild=guild_settings,
-                defaults={}
-            )
+    # Check approvals channel — always ensure it exists
+    approvals_channel = None
+    if guild_settings.approvals_channel_id:
+        approvals_channel = guild.get_channel(guild_settings.approvals_channel_id)
+    if not approvals_channel:
+        approvals_channel = await get_or_create_channel(guild, "approvals", bot_admin_role)
+        guild_settings.approvals_channel_id = approvals_channel.id
+        changed = True
+        await sync_to_async(DiscordChannel.objects.update_or_create)(
+            discord_id=approvals_channel.id,
+            guild=guild_settings,
+            defaults={}
+        )
     
-    # Check pending channel
+    # Check pending channel — always ensure it exists
+    pending_channel = None
     if guild_settings.pending_channel_id:
-        channel = guild.get_channel(guild_settings.pending_channel_id)
-        if not channel:
-            pending_role = guild.get_role(guild_settings.pending_role_id)
-            if pending_role:
-                channel = await get_or_create_pending_channel(guild, pending_role)
-                guild_settings.pending_channel_id = channel.id
-                await sync_to_async(guild_settings.save)()
-                
-                await sync_to_async(DiscordChannel.objects.update_or_create)(
-                    discord_id=channel.id,
-                    guild=guild_settings,
-                    defaults={}
-                )
+        pending_channel = guild.get_channel(guild_settings.pending_channel_id)
+    if not pending_channel:
+        pending_channel = await get_or_create_pending_channel(guild, pending_role)
+        guild_settings.pending_channel_id = pending_channel.id
+        changed = True
+        await sync_to_async(DiscordChannel.objects.update_or_create)(
+            discord_id=pending_channel.id,
+            guild=guild_settings,
+            defaults={}
+        )
+    
+    if changed:
+        await sync_to_async(guild_settings.save)()
