@@ -1,6 +1,7 @@
 from core.models import GuildSettings, BotCommand
 from asgiref.sync import sync_to_async
 from bot.execution.action_executor import execute_command_actions, handle_generate_access_token
+from bot.handlers.templates import get_template_async
 
 
 class CommandRegistry:
@@ -25,7 +26,8 @@ class CommandRegistry:
         # getaccess is DM-only — bypass normal guild-based command lookup
         if command_name == 'getaccess':
             if message.guild:
-                await message.channel.send("⚠️ This command only works in DMs. Please send me a direct message!")
+                tpl = await get_template_async(None, 'DM_ONLY_WARNING')
+                await message.channel.send(tpl)
                 return
             # DM context — call handler directly (no guild_settings needed)
             await handle_generate_access_token(bot, message, {}, None)
@@ -33,7 +35,8 @@ class CommandRegistry:
         
         # All other commands require server context
         if not message.guild:
-            await message.channel.send("❌ Commands only work in servers. Use `getaccess` in DMs for web panel access.")
+            tpl = await get_template_async(None, 'SERVER_ONLY_WARNING')
+            await message.channel.send(tpl)
             return
         
         # Get guild settings (must exist for guild commands)
@@ -55,16 +58,15 @@ class CommandRegistry:
                 lambda: list(BotCommand.objects.filter(guild=guild_settings, enabled=True).values_list('name', flat=True))
             )()
             
-            if available:
-                cmd_list = ', '.join(sorted(available))
-                await message.channel.send(f"❌ Command `{command_name}` not found.\n\n📋 **Available commands:** {cmd_list}")
-            else:
-                await message.channel.send(f"❌ Command `{command_name}` not found. No commands configured for this server.")
+            cmd_list = ', '.join(sorted(available)) if available else 'none'
+            tpl = await get_template_async(guild_settings, 'COMMAND_NOT_FOUND')
+            await message.channel.send(tpl.format(command=command_name, commands=cmd_list))
             return
         
         # Check if command is enabled
         if not bot_cmd.enabled:
-            await message.channel.send(f"❌ Command `{command_name}` is disabled on this server.")
+            tpl = await get_template_async(guild_settings, 'COMMAND_DISABLED')
+            await message.channel.send(tpl.format(command=command_name))
             return
         
         # Execute all CommandActions for this command in order
@@ -83,7 +85,8 @@ class CommandRegistry:
         
         except Exception as e:
             print(f"❌ Unexpected error executing {command_name}: {e}")
-            await message.channel.send(f"❌ An error occurred: {str(e)}")
+            tpl = await get_template_async(guild_settings, 'COMMAND_ERROR')
+            await message.channel.send(tpl.format(message=str(e)))
     
     async def get_commands_for_user(self, guild_settings):
         """

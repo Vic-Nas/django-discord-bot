@@ -214,22 +214,22 @@ async def send_form_link(bot, member, guild_settings, invite_data):
     )
 
     if not fields:
-        await pending_channel.send(
-            f"👋 Welcome {member.mention}! No application form is configured yet. "
-            f"Please wait for an admin to review your join request."
-        )
+        template = await get_template_async(guild_settings, 'PENDING_WELCOME_NO_FORM')
+        msg = template.format(user=member.mention)
+        await pending_channel.send(msg)
         # Still notify admins in #approvals
         await post_application_for_review(bot, guild_settings, member, application, invite_data)
         return
 
     field_list = '\n'.join([f"• {f.label}" for f in fields])
-    await pending_channel.send(
-        f"👋 Welcome {member.mention}!\n\n"
-        f"To complete your application for **{member.guild.name}**, please fill out the form:\n"
-        f"🔗 [Application Form]({form_url})\n\n"
-        f"The form will ask you about:\n{field_list}\n\n"
-        f"Once submitted, an admin will review your application."
+    template = await get_template_async(guild_settings, 'PENDING_WELCOME')
+    msg = template.format(
+        user=member.mention,
+        server=member.guild.name,
+        form_url=form_url,
+        field_list=field_list,
     )
+    await pending_channel.send(msg)
 
     # Do NOT post to #approvals yet — that happens when the form is submitted on the web
 

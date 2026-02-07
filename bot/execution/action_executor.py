@@ -550,7 +550,8 @@ async def handle_generate_access_token(bot, message, params, guild_settings):
             admin_guilds.append((guild, gs))
 
     if not admin_guilds:
-        await message.author.send("⚠️ You are not a BotAdmin in any server I'm in.")
+        tpl = await get_template_async(None, 'GETACCESS_NO_ADMIN')
+        await message.author.send(tpl)
         return
 
     if len(admin_guilds) == 1:
@@ -559,7 +560,8 @@ async def handle_generate_access_token(bot, message, params, guild_settings):
     else:
         # Multiple guilds — ask user to pick
         guild_list = '\n'.join([f"**{i+1}.** {g.name}" for i, (g, _) in enumerate(admin_guilds)])
-        await message.author.send(f"You are a BotAdmin in multiple servers. Reply with the number:\n{guild_list}")
+        tpl = await get_template_async(None, 'GETACCESS_PICK_SERVER')
+        await message.author.send(tpl.format(guild_list=guild_list))
 
         def check(m):
             return m.author.id == message.author.id and m.guild is None and m.content.isdigit()
@@ -591,11 +593,8 @@ async def handle_generate_access_token(bot, message, params, guild_settings):
     if existing:
         expires_str = existing.expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')
         access_url = f"{app_url}/auth/login/?token={existing.token}"
-        await message.author.send(
-            f"🔑 You already have an active token for **{selected_guild.name}**:\n"
-            f"[Admin Panel]({access_url})\n"
-            f"Expires: {expires_str}"
-        )
+        tpl = await get_template_async(selected_gs, 'GETACCESS_EXISTS')
+        await message.author.send(tpl.format(server=selected_guild.name, url=access_url, expires=expires_str))
         return
 
     # Create new token
@@ -612,11 +611,8 @@ async def handle_generate_access_token(bot, message, params, guild_settings):
 
     expires_str = expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')
     access_url = f"{app_url}/auth/login/?token={token}"
-    await message.author.send(
-        f"🔑 Access token for **{selected_guild.name}**:\n"
-        f"[Admin Panel]({access_url})\n"
-        f"Expires: {expires_str}"
-    )
+    tpl = await get_template_async(selected_gs, 'GETACCESS_RESPONSE')
+    await message.author.send(tpl.format(server=selected_guild.name, url=access_url, expires=expires_str))
 
 
 async def handle_approve_application(bot, message, params, args, guild_settings):
@@ -682,17 +678,16 @@ async def handle_approve_application(bot, message, params, args, guild_settings)
     # Notify the user
     try:
         roles_str = ', '.join(assigned_roles) if assigned_roles else 'no specific roles'
-        await target_user.send(
-            f"✅ Your application in **{message.guild.name}** has been approved! "
-            f"Roles assigned: {roles_str}"
-        )
+        template = await get_template_async(guild_settings, 'APPROVE_DM')
+        dm_msg = template.format(server=message.guild.name, roles=roles_str)
+        await target_user.send(dm_msg)
     except discord.Forbidden:
         pass  # Can't DM user
 
     roles_str = ', '.join(assigned_roles) if assigned_roles else 'none'
-    await message.channel.send(
-        f"✅ Approved **{target_user.display_name}**. Roles assigned: {roles_str}"
-    )
+    template = await get_template_async(guild_settings, 'APPROVE_CONFIRM')
+    confirm_msg = template.format(user=target_user.display_name, roles=roles_str)
+    await message.channel.send(confirm_msg)
 
 
 async def handle_reject_application(bot, message, params, args, guild_settings):
@@ -737,10 +732,9 @@ async def handle_reject_application(bot, message, params, args, guild_settings):
         pending_channel = bot.get_channel(guild_settings.pending_channel_id)
         if pending_channel:
             try:
-                await pending_channel.send(
-                    f"❌ {target_user.mention}, your application has been rejected.\n"
-                    f"**Reason:** {reason}"
-                )
+                from bot.handlers.templates import get_template_async as _get_tpl
+                tpl = await _get_tpl(guild_settings, 'REJECT_PENDING')
+                await pending_channel.send(tpl.format(user=target_user.mention, reason=reason))
             except discord.Forbidden:
                 pass
 
@@ -755,10 +749,9 @@ async def handle_reject_application(bot, message, params, args, guild_settings):
 
     # Notify the user
     try:
-        await target_user.send(
-            f"❌ Your application in **{message.guild.name}** has been rejected.\n"
-            f"Reason: {reason}"
-        )
+        from bot.handlers.templates import get_template_async as _get_tpl2
+        tpl = await _get_tpl2(guild_settings, 'REJECT_DM')
+        await target_user.send(tpl.format(server=message.guild.name, reason=reason))
     except discord.Forbidden:
         pass
 
@@ -769,9 +762,8 @@ async def handle_reject_application(bot, message, params, args, guild_settings):
         except discord.Forbidden:
             pass
 
-    await message.channel.send(
-        f"❌ Rejected **{target_user.display_name}**. Reason: {reason}"
-    )
+    tpl = await _get_tpl2(guild_settings, 'REJECT_CONFIRM')
+    await message.channel.send(tpl.format(user=target_user.display_name, reason=reason))
 
 
 async def handle_list_form_fields(bot, message, params, guild_settings):

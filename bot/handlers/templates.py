@@ -31,6 +31,18 @@ DEFAULT_TEMPLATES = {
 ⏳ **Status:** Awaiting application review
 🏷️ **Role:** {pending}""",
 
+    'PENDING_WELCOME': """👋 Welcome {user}!
+
+To complete your application for **{server}**, please fill out the form:
+🔗 [Application Form]({form_url})
+
+The form will ask you about:
+{field_list}
+
+Once submitted, an admin will review your application.""",
+
+    'PENDING_WELCOME_NO_FORM': """👋 Welcome {user}! No application form is configured yet. Please wait for an admin to review your join request.""",
+
     'APPLICATION_SENT': """✅ **Application Submitted!**
 
 Thank you for applying to **{server}**!
@@ -56,6 +68,18 @@ Unfortunately, your application to **{server}** was not approved at this time.
 
 You may reapply in the future if server rules allow.""",
 
+    'APPROVE_CONFIRM': """✅ Approved **{user}**. Roles assigned: {roles}""",
+
+    'APPROVE_DM': """✅ Your application in **{server}** has been approved! Roles assigned: {roles}""",
+
+    'REJECT_CONFIRM': """❌ Rejected **{user}**. Reason: {reason}""",
+
+    'REJECT_DM': """❌ Your application in **{server}** has been rejected.
+Reason: {reason}""",
+
+    'REJECT_PENDING': """❌ {user}, your application has been rejected.
+**Reason:** {reason}""",
+
     'APPROVAL_NOTIFICATION': """📋 **New Application**
 
 👤 **User:** {user}
@@ -65,23 +89,21 @@ You may reapply in the future if server rules allow.""",
 **Responses:**
 {responses}
 
-✅ React with ✅ to approve
-❌ React with ❌ to reject""",
+✅ `@Bot approve {user_mention} role1,role2`
+❌ `@Bot reject {user_mention} [reason]`""",
 
-    'GETACCESS_RESPONSE': """🔑 **Admin Panel Access**
+    'GETACCESS_RESPONSE': """🔑 Access token for **{server}**:
+[Admin Panel]({url})
+Expires: {expires}""",
 
-Here's your access link:
-{url}
+    'GETACCESS_EXISTS': """🔑 You already have an active token for **{server}**:
+[Admin Panel]({url})
+Expires: {expires}""",
 
-⏰ **Expires:** {expires}
+    'GETACCESS_NO_ADMIN': """⚠️ You are not a BotAdmin in any server I'm in.""",
 
-Keep this link private!""",
-
-    'GETACCESS_EXISTS': """🔑 **You already have an active token!**
-
-{url}
-
-⏰ **Expires:** {expires}""",
+    'GETACCESS_PICK_SERVER': """You are a BotAdmin in multiple servers. Reply with the number:
+{guild_list}""",
 
     'HELP_MESSAGE': """🤖 **Bot Commands**
 
@@ -96,6 +118,27 @@ Keep this link private!""",
     'COMMAND_ERROR': """❌ **Error**
 
 {message}""",
+
+    'COMMAND_NOT_FOUND': """❌ Command `{command}` not found.
+
+📋 **Available commands:** {commands}""",
+
+    'COMMAND_DISABLED': """❌ Command `{command}` is disabled on this server.""",
+
+    'DM_ONLY_WARNING': """⚠️ This command only works in DMs. Please send me a direct message!""",
+
+    'SERVER_ONLY_WARNING': """❌ Commands only work in servers. Use `getaccess` in DMs for web panel access.""",
+
+    'SETUP_DIAGNOSTIC': """⚠️ **Setup Issue Detected**
+
+I couldn't assign the BotAdmin role to myself. My role is: **{bot_role}**
+
+**Possible fixes:**
+1. **Role Hierarchy**: In Server Settings → Roles, make sure my role (**{bot_role}**) is positioned **above** BotAdmin in the hierarchy
+2. **Permissions**: Make sure I have the "Manage Roles" permission
+3. **Re-add the bot**: Kick me from the server and add me back (this might trigger a fresh setup)
+
+I need this to manage BotAdmin role assignments and channel permissions.""",
 }
 
 
