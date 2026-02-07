@@ -207,8 +207,18 @@ class MessageTemplateAdmin(admin.ModelAdmin):
 
 @admin.register(GuildMessageTemplate)
 class GuildMessageTemplateAdmin(admin.ModelAdmin):
-    list_display = ('guild', 'template')
-    list_filter = ('guild',)
+    list_display = ('guild', 'template_type', 'custom_content_preview')
+    list_filter = ('guild', 'template__template_type')
+    search_fields = ('template__template_type', 'custom_content')
+
+    def template_type(self, obj):
+        return obj.template.get_template_type_display()
+    template_type.short_description = 'Template'
+    template_type.admin_order_field = 'template__template_type'
+
+    def custom_content_preview(self, obj):
+        return obj.custom_content[:100] + '...' if len(obj.custom_content) > 100 else obj.custom_content
+    custom_content_preview.short_description = 'Custom Content'
 
 
 # ─── Access Tokens ────────────────────────────────────────────────────────────
