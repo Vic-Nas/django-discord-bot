@@ -649,8 +649,98 @@ async def _extract_selections_from_application(guild_settings, application):
     return role_ids, channel_ids
 
 
+async def _bulk_approve_pending(bot, message, guild_settings, pending_role, admin_role):
+    """Approve all members who have the Pending role."""
+    from core.models import Application
+    from bot.handlers.templates import get_template_async
+
+    members_with_pending = [m for m in message.guild.members if pending_role in m.roles]
+
+    if not members_with_pending:
+        raise ExecutionError("No members currently have the Pending role.")
+
+    approvals_channel = message.guild.get_channel(guild_settings.approvals_channel_id) or message.channel
+
+    summary = {'approved': 0, 'skipped_no_form': 0, 'role_failures': 0, 'channel_failures': 0, 'dm_failed': 0}
+
+    for member in members_with_pending:
+        # Find pending application for this member
+        application = await sync_to_async(
+            lambda uid=member.id: Application.objects.filter(
+                guild=guild_settings,
+                user_id=uid,
+                status='PENDING'
+            ).order_by('-created_at').first()
+        )()
+
+        # Skip members who haven't filled out the form
+        if not application:
+            summary['skipped_no_form'] += 1
+            continue
+
+        # Extract roles/channels from form responses
+        roles_to_assign = []
+        channels_to_allow = []
+        if application and application.responses:
+            role_ids_from_form, channel_ids_from_form = await _extract_selections_from_application(guild_settings, application)
+            for rid in role_ids_from_form:
+                role = message.guild.get_role(rid)
+                if role:
+                    roles_to_assign.append(role)
+            for cid in channel_ids_from_form:
+                ch = message.guild.get_channel(cid)
+                if ch:
+                    channels_to_allow.append(ch)
+
+        # Remove Pending role
+        try:
+            await member.remove_roles(pending_role)
+        except Exception:
+            pass
+
+        # Assign roles
+        for role in roles_to_assign:
+            try:
+                await member.add_roles(role)
+            except Exception:
+                summary['role_failures'] += 1
+
+        # Grant channel access
+        for ch in channels_to_allow:
+            try:
+                await ch.set_permissions(member, read_messages=True, send_messages=True)
+            except Exception:
+                summary['channel_failures'] += 1
+
+        # Update application status
+        if application:
+            application.status = 'APPROVED'
+            application.reviewed_by = message.author.id
+            application.reviewed_at = timezone.now()
+            await sync_to_async(application.save)()
+
+        # DM the user
+        try:
+            roles_str = ', '.join(r.name for r in roles_to_assign) if roles_to_assign else 'no specific roles'
+            template = await get_template_async(guild_settings, 'APPROVE_DM')
+            dm_msg = template.format(server=message.guild.name, roles=roles_str)
+            await member.send(dm_msg)
+        except discord.Forbidden:
+            summary['dm_failed'] += 1
+
+        summary['approved'] += 1
+
+    await approvals_channel.send(
+        f"✅ Bulk approve complete — **{summary['approved']}** members approved."
+        + (f" | Skipped (no form): {summary['skipped_no_form']}" if summary['skipped_no_form'] else "")
+        + (f" | ⚠️ Role failures: {summary['role_failures']}" if summary['role_failures'] else "")
+        + (f" | ⚠️ Channel failures: {summary['channel_failures']}" if summary['channel_failures'] else "")
+        + (f" | DM failed: {summary['dm_failed']}" if summary['dm_failed'] else "")
+    )
+
+
 async def handle_approve_application(bot, message, params, args, guild_settings):
-    """APPROVE_APPLICATION: Approve a user and assign roles. Usage: @Bot approve @user [@role1 @role2 ...]"""
+    """APPROVE_APPLICATION: Approve a user and assign roles. Usage: @Bot approve @user [@role1 @role2 ...] or @Bot approve @Pending"""
     from core.models import Application, DiscordRole, FormField
     from bot.handlers.templates import get_template_async
 
@@ -663,7 +753,13 @@ async def handle_approve_application(bot, message, params, args, guild_settings)
         raise ExecutionError("You need the **BotAdmin** role to use this command.")
 
     if len(args) < 1:
-        raise ExecutionError("Usage: `@Bot approve @user [@role ...]`")
+        raise ExecutionError("Usage: `@Bot approve @user [@role ...]` or `@Bot approve @Pending`")
+
+    # Check if @Pending role was mentioned → bulk approve all members with that role
+    pending_role = message.guild.get_role(guild_settings.pending_role_id) if guild_settings.pending_role_id else None
+    if pending_role and pending_role in message.role_mentions:
+        await _bulk_approve_pending(bot, message, guild_settings, pending_role, admin_role)
+        return
 
     # Parse mentioned user (filter out the bot itself from mentions)
     user_mentions = [u for u in message.mentions if u.id != bot.user.id]

@@ -167,7 +167,29 @@ class ApplicationAdmin(admin.ModelAdmin):
     list_display = ('user_name', 'guild', 'status', 'invite_code', 'created_at')
     list_filter = ('guild', 'status')
     search_fields = ('user_name',)
-    readonly_fields = ('created_at', 'responses')
+    readonly_fields = ('created_at', 'responses', 'status', 'reviewed_by', 'reviewed_at')
+    
+    def get_readonly_fields(self, request, obj=None):
+        """Make status readonly - must use Discord commands to approve/reject"""
+        if obj:  # editing existing
+            return self.readonly_fields
+        return ('created_at', 'responses')  # allow setting initial status on create
+    
+    fieldsets = (
+        ('Application Info', {
+            'fields': ('guild', 'user_id', 'user_name', 'invite_code', 'inviter_id', 'inviter_name'),
+        }),
+        ('Status', {
+            'fields': ('status', 'reviewed_by', 'reviewed_at'),
+            'description': '⚠️ To approve/reject applications and trigger role assignments, use Discord commands: <code>@Bot approve @user</code> or <code>@Bot reject @user</code>. Changing status here only updates the database.',
+        }),
+        ('Responses', {
+            'fields': ('responses',),
+        }),
+        ('Timestamps', {
+            'fields': ('created_at',),
+        }),
+    )
 
 
 # ─── Bot Commands & Actions ───────────────────────────────────────────────────
