@@ -1,6 +1,6 @@
 from core.models import GuildSettings, BotCommand
 from asgiref.sync import sync_to_async
-from bot.execution.action_executor import execute_command_actions
+from bot.execution.action_executor import execute_command_actions, handle_generate_access_token
 
 
 class CommandRegistry:
@@ -22,31 +22,26 @@ class CommandRegistry:
             invite_cache: Invite cache dict for member tracking
         """
         
-        # Special handling for getaccess - allows DM
+        # getaccess is DM-only — bypass normal guild-based command lookup
         if command_name == 'getaccess':
             if message.guild:
-                # In server, look up guild settings
-                try:
-                    guild_settings = await sync_to_async(GuildSettings.objects.get)(guild_id=message.guild.id)
-                except GuildSettings.DoesNotExist:
-                    await message.channel.send("❌ This server is not configured. Please contact a server administrator.")
-                    return
-            else:
-                # In DM, we can't determine guild - getaccess requires a guild context
-                await message.channel.send("❌ This command must be used in a server.")
+                await message.channel.send("⚠️ This command only works in DMs. Please send me a direct message!")
                 return
-        else:
-            # All other commands require server context
-            if not message.guild:
-                await message.channel.send("❌ Commands only work in servers.")
-                return
-            
-            # Get guild settings (must exist for guild commands)
-            try:
-                guild_settings = await sync_to_async(GuildSettings.objects.get)(guild_id=message.guild.id)
-            except GuildSettings.DoesNotExist:
-                await message.channel.send("❌ This server is not configured. Please contact a server administrator.")
-                return
+            # DM context — call handler directly (no guild_settings needed)
+            await handle_generate_access_token(bot, message, {}, None)
+            return
+        
+        # All other commands require server context
+        if not message.guild:
+            await message.channel.send("❌ Commands only work in servers. Use `getaccess` in DMs for web panel access.")
+            return
+        
+        # Get guild settings (must exist for guild commands)
+        try:
+            guild_settings = await sync_to_async(GuildSettings.objects.get)(guild_id=message.guild.id)
+        except GuildSettings.DoesNotExist:
+            await message.channel.send("❌ This server is not configured. Please contact a server administrator.")
+            return
         
         # Look up command in database
         try:
@@ -73,7 +68,8 @@ class CommandRegistry:
             return
         
         # Execute all CommandActions for this command in order
-        print(f"📤 Executing command '{command_name}' on server {message.guild.name}")
+        guild_name = message.guild.name if message.guild else 'DM'
+        print(f"📤 Executing command '{command_name}' on server {guild_name}")
         
         try:
             results = await execute_command_actions(bot, message, bot_cmd, guild_settings, args)

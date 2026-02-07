@@ -232,6 +232,96 @@ class TestHandlersWithRealGuild:
         message.channel.send.assert_called_once()
         call_args = message.channel.send.call_args[0][0]
         assert 'DM' in call_args or 'direct message' in call_args.lower()
+
+    @pytest.mark.asyncio
+    async def test_generate_access_token_dm_flow(self):
+        """Test full DM flow: find BotAdmin guilds, generate token"""
+        # Pick a real role to be BotAdmin
+        test_roles = [r for r in self.guild.roles if not r.is_bot_managed() and not r.is_default()]
+        if not test_roles:
+            pytest.skip("No roles available for BotAdmin")
+
+        bot_admin_role = test_roles[0]
+
+        # Set bot_admin_role_id on guild settings
+        self.guild_settings.bot_admin_role_id = bot_admin_role.id
+        await sync_to_async(self.guild_settings.save)()
+
+        # Find a real member who has that role (or the bot owner)
+        member_with_role = None
+        for member in self.guild.members:
+            if bot_admin_role in member.roles:
+                member_with_role = member
+                break
+
+        if not member_with_role:
+            pytest.skip(f"No member has role '{bot_admin_role.name}' in test guild")
+
+        # Simulate DM context: guild is None, author is the member
+        message = AsyncMock()
+        message.guild = None  # DM context
+        message.author = AsyncMock()
+        message.author.id = member_with_role.id
+        message.author.name = member_with_role.name
+        message.author.send = AsyncMock()
+
+        # Clean up any existing tokens first
+        await sync_to_async(
+            lambda: AccessToken.objects.filter(
+                user_id=member_with_role.id, guild=self.guild_settings
+            ).delete()
+        )()
+
+        await handle_generate_access_token(self.bot, message, {}, self.guild_settings)
+
+        # Should have sent a DM with the token URL (single guild = no picker)
+        message.author.send.assert_called()
+        dm_text = message.author.send.call_args[0][0]
+        assert 'access' in dm_text.lower() or '/access/' in dm_text
+
+        # Verify token was created in DB
+        token = await sync_to_async(
+            lambda: AccessToken.objects.filter(
+                user_id=member_with_role.id, guild=self.guild_settings
+            ).first()
+        )()
+        assert token is not None, "AccessToken was not created in DB"
+        assert token.token  # non-empty token string
+
+        # Calling again should return existing token
+        message.author.send.reset_mock()
+        await handle_generate_access_token(self.bot, message, {}, self.guild_settings)
+        message.author.send.assert_called()
+        dm_text_2 = message.author.send.call_args[0][0]
+        assert 'already' in dm_text_2.lower() or token.token in dm_text_2
+
+        # Clean up
+        await sync_to_async(
+            lambda: AccessToken.objects.filter(
+                user_id=member_with_role.id, guild=self.guild_settings
+            ).delete()
+        )()
+
+    @pytest.mark.asyncio
+    async def test_generate_access_token_dm_no_admin(self):
+        """Test DM flow when user is not BotAdmin in any guild"""
+        # Set bot_admin_role_id to a role that nobody has
+        self.guild_settings.bot_admin_role_id = 1  # non-existent role
+        await sync_to_async(self.guild_settings.save)()
+
+        message = AsyncMock()
+        message.guild = None  # DM context
+        message.author = AsyncMock()
+        message.author.id = 999999999999999999  # Fake user
+        message.author.name = 'FakeUser'
+        message.author.send = AsyncMock()
+
+        await handle_generate_access_token(self.bot, message, {}, self.guild_settings)
+
+        # Should tell user they're not admin anywhere
+        message.author.send.assert_called_once()
+        dm_text = message.author.send.call_args[0][0]
+        assert 'not' in dm_text.lower() and 'admin' in dm_text.lower()
     
     @pytest.mark.asyncio
     async def test_set_server_mode(self):
