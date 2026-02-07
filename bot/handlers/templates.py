@@ -31,17 +31,9 @@ DEFAULT_TEMPLATES = {
 ⏳ **Status:** Awaiting application review
 🏷️ **Role:** {pending}""",
 
-    'PENDING_WELCOME': """👋 Welcome {user}!
+    'PENDING_CHANNEL_TOPIC': """Welcome! Please fill out the application form to get started: {form_url}""",
 
-To complete your application for **{server}**, please fill out the form:
-🔗 [Application Form]({form_url})
-
-The form will ask you about:
-{field_list}
-
-Once submitted, an admin will review your application.""",
-
-    'PENDING_WELCOME_NO_FORM': """👋 Welcome {user}! No application form is configured yet. Please wait for an admin to review your join request.""",
+    'PENDING_CHANNEL_TOPIC_NO_FORM': """Welcome! Please wait for an admin to review your join request.""",
 
     'APPLICATION_SENT': """✅ **Application Submitted!**
 

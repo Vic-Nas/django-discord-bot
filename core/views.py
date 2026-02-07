@@ -184,7 +184,7 @@ def _post_application_embed(guild_settings, application, fields):
 
 @csrf_exempt
 def form_view(request, guild_id):
-    """GET  — render the application form
+    """GET  — render the application form (or lookup page if no user param)
     POST — save responses and notify #approvals"""
     from .models import FormField, Application
 
@@ -196,8 +196,38 @@ def form_view(request, guild_id):
 
     user_id = request.GET.get('user') or request.POST.get('user_id')
     invite_code = request.GET.get('invite') or request.POST.get('invite_code')
+
+    # ---- lookup flow: no user param ----
     if not user_id:
-        return HttpResponse('Missing user parameter.', status=400)
+        if request.method == 'POST' and request.POST.get('lookup_username'):
+            # User submitted the lookup form
+            username = request.POST.get('lookup_username', '').strip()
+            matches = Application.objects.filter(
+                guild=guild_settings,
+                status='PENDING',
+                user_name__icontains=username,
+            ).filter(responses={})  # only un-submitted
+            if matches.count() == 1:
+                app = matches.first()
+                # Redirect to the form with the user param
+                return redirect(f'/form/{guild_id}/?user={app.user_id}&invite={app.invite_code}')
+            elif matches.count() > 1:
+                return render(request, 'form_lookup.html', {
+                    'guild_name': guild_settings.guild_name,
+                    'guild_id': guild_id,
+                    'error': 'Multiple pending applications found. Please use your exact Discord username (e.g. myname#1234).',
+                })
+            else:
+                return render(request, 'form_lookup.html', {
+                    'guild_name': guild_settings.guild_name,
+                    'guild_id': guild_id,
+                    'error': 'No pending application found for that username. Make sure you joined the server first.',
+                })
+        # Show lookup page
+        return render(request, 'form_lookup.html', {
+            'guild_name': guild_settings.guild_name,
+            'guild_id': guild_id,
+        })
 
     # ---- find pending application ----
     try:

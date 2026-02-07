@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Application — {{ guild_name }}</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            background: #313338;
+            color: #dbdee1;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            padding: 40px 16px;
+        }
+        .container {
+            width: 100%;
+            max-width: 480px;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+        .header h1 {
+            font-size: 24px;
+            color: #f2f3f5;
+            margin-bottom: 6px;
+        }
+        .header p {
+            font-size: 14px;
+            color: #949ba4;
+        }
+        .card {
+            background: #2b2d31;
+            border-radius: 8px;
+            padding: 24px;
+        }
+        label.field-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: #b5bac1;
+            margin-bottom: 8px;
+            letter-spacing: 0.02em;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 10px 12px;
+            background: #1e1f22;
+            border: 1px solid #3f4147;
+            border-radius: 4px;
+            color: #dbdee1;
+            font-size: 15px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.15s;
+            margin-bottom: 20px;
+        }
+        input[type="text"]:focus {
+            border-color: #5865f2;
+        }
+        button[type="submit"] {
+            width: 100%;
+            padding: 12px;
+            background: #5865f2;
+            color: #fff;
+            font-size: 15px;
+            font-weight: 600;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        button[type="submit"]:hover {
+            background: #4752c4;
+        }
+        button[type="submit"]:active {
+            background: #3c45a5;
+        }
+        .error-banner {
+            background: #f23f42;
+            color: #fff;
+            padding: 12px 16px;
+            border-radius: 4px;
+            margin-bottom: 16px;
+            font-size: 14px;
+        }
+        ::placeholder {
+            color: #6d6f78;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>{{ guild_name }}</h1>
+            <p>Enter your Discord username to find your application.</p>
+        </div>
+
+        {% if error %}
+        <div class="error-banner">{{ error }}</div>
+        {% endif %}
+
+        <div class="card">
+            <form method="post">
+                <label class="field-label">Discord Username</label>
+                <input type="text" name="lookup_username"
+                       placeholder="e.g. myusername"
+                       required autofocus>
+                <button type="submit">Find My Application</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

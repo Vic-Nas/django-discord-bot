@@ -174,7 +174,7 @@ async def log_join(bot, member, guild_settings, invite_data, roles, mode):
 
 
 async def send_form_link(bot, member, guild_settings, invite_data):
-    """Send form link in the #pending channel so the new member can fill it out."""
+    """Set #pending channel topic with form link (or generic welcome) and create Application record."""
     from core.models import FormField
 
     # Get form fields to check if any exist
@@ -182,21 +182,10 @@ async def send_form_link(bot, member, guild_settings, invite_data):
         lambda: list(FormField.objects.select_related('dropdown').filter(guild=guild_settings).order_by('order'))
     )()
 
-    # Build form URL
-    app_url = os.environ.get('APP_URL', 'https://your-domain.com').rstrip('/')
-    if not app_url.startswith(('http://', 'https://')):
-        app_url = f'https://{app_url}'
-    form_url = f"{app_url}/form/{guild_settings.guild_id}?user={member.id}&invite={invite_data['code']}"
-
-    # Send in #pending channel
+    # Find #pending channel
     pending_channel = bot.get_channel(guild_settings.pending_channel_id) if guild_settings.pending_channel_id else None
     if not pending_channel:
-        # Fallback: try to find a channel named 'pending'
         pending_channel = discord.utils.get(member.guild.text_channels, name='pending')
-
-    if not pending_channel:
-        print(f'⚠️ No #pending channel found for {member.guild.name}')
-        return
 
     # Always create an Application record to track the member
     inviter_id = invite_data['inviter'].id if invite_data['inviter'] else None
@@ -214,22 +203,31 @@ async def send_form_link(bot, member, guild_settings, invite_data):
     )
 
     if not fields:
-        template = await get_template_async(guild_settings, 'PENDING_WELCOME_NO_FORM')
-        msg = template.format(user=member.mention)
-        await pending_channel.send(msg)
+        # No form fields — set topic to generic welcome, notify admins directly
+        if pending_channel:
+            template = await get_template_async(guild_settings, 'PENDING_CHANNEL_TOPIC_NO_FORM')
+            try:
+                await pending_channel.edit(topic=template)
+            except Exception as e:
+                print(f'⚠️ Could not set #pending topic: {e}')
         # Still notify admins in #approvals
         await post_application_for_review(bot, guild_settings, member, application, invite_data)
         return
 
-    field_list = '\n'.join([f"• {f.label}" for f in fields])
-    template = await get_template_async(guild_settings, 'PENDING_WELCOME')
-    msg = template.format(
-        user=member.mention,
-        server=member.guild.name,
-        form_url=form_url,
-        field_list=field_list,
-    )
-    await pending_channel.send(msg)
+    # Build form URL (generic — no user-specific params)
+    app_url = os.environ.get('APP_URL', 'https://your-domain.com').rstrip('/')
+    if not app_url.startswith(('http://', 'https://')):
+        app_url = f'https://{app_url}'
+    form_url = f"{app_url}/form/{guild_settings.guild_id}/"
+
+    # Set channel topic with form link
+    if pending_channel:
+        template = await get_template_async(guild_settings, 'PENDING_CHANNEL_TOPIC')
+        topic = template.format(form_url=form_url)
+        try:
+            await pending_channel.edit(topic=topic)
+        except Exception as e:
+            print(f'⚠️ Could not set #pending topic: {e}')
 
     # Do NOT post to #approvals yet — that happens when the form is submitted on the web
 

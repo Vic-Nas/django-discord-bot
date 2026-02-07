@@ -16,7 +16,14 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         # Initialize message templates
         self.stdout.write('Initializing message templates...')
-        
+
+        # Clean up old/renamed template types no longer in DEFAULT_TEMPLATES
+        valid_types = set(DEFAULT_TEMPLATES.keys())
+        old_templates = MessageTemplate.objects.exclude(template_type__in=valid_types)
+        for old in old_templates:
+            self.stdout.write(self.style.WARNING(f'  🗑 Removing obsolete template: {old.template_type}'))
+            old.delete()
+
         for template_type, content in DEFAULT_TEMPLATES.items():
             template, created = MessageTemplate.objects.get_or_create(
                 template_type=template_type,
