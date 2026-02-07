@@ -69,7 +69,7 @@ async def setup_guild(bot, guild):
     await sync_to_async(DiscordChannel.objects.update_or_create)(
         discord_id=bounce_channel.id,
         guild=guild_settings,
-        defaults={}
+        defaults={'name': bounce_channel.name}
     )
     
     # Create #approvals channel (private, BotAdmin only)
@@ -79,7 +79,7 @@ async def setup_guild(bot, guild):
     await sync_to_async(DiscordChannel.objects.update_or_create)(
         discord_id=approvals_channel.id,
         guild=guild_settings,
-        defaults={}
+        defaults={'name': approvals_channel.name}
     )
     
     # Create #pending channel (visible ONLY to Pending role + bot)
@@ -89,7 +89,7 @@ async def setup_guild(bot, guild):
     await sync_to_async(DiscordChannel.objects.update_or_create)(
         discord_id=pending_channel.id,
         guild=guild_settings,
-        defaults={}
+        defaults={'name': pending_channel.name}
     )
     
     # Restrict Pending role from seeing all other channels
@@ -380,7 +380,7 @@ async def ensure_required_resources(bot, guild_settings):
         await sync_to_async(DiscordChannel.objects.update_or_create)(
             discord_id=bounce_channel.id,
             guild=guild_settings,
-            defaults={}
+            defaults={'name': bounce_channel.name}
         )
     
     # Check approvals channel — always ensure it exists
@@ -394,7 +394,7 @@ async def ensure_required_resources(bot, guild_settings):
         await sync_to_async(DiscordChannel.objects.update_or_create)(
             discord_id=approvals_channel.id,
             guild=guild_settings,
-            defaults={}
+            defaults={'name': approvals_channel.name}
         )
     
     # Check pending channel — always ensure it exists
@@ -408,7 +408,7 @@ async def ensure_required_resources(bot, guild_settings):
         await sync_to_async(DiscordChannel.objects.update_or_create)(
             discord_id=pending_channel.id,
             guild=guild_settings,
-            defaults={}
+            defaults={'name': pending_channel.name}
         )
     
     if changed:

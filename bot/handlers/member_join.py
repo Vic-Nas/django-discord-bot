@@ -179,7 +179,7 @@ async def send_form_link(bot, member, guild_settings, invite_data):
 
     # Get form fields to check if any exist
     fields = await sync_to_async(
-        lambda: list(FormField.objects.filter(guild=guild_settings).order_by('order'))
+        lambda: list(FormField.objects.select_related('dropdown').filter(guild=guild_settings).order_by('order'))
     )()
 
     # Build form URL
@@ -247,7 +247,7 @@ async def post_application_for_review(bot, guild_settings, member, application, 
     
     # Format responses
     from core.models import FormField
-    fields = await sync_to_async(lambda: list(FormField.objects.filter(guild=guild_settings).order_by('order')))()
+    fields = await sync_to_async(lambda: list(FormField.objects.select_related('dropdown').filter(guild=guild_settings).order_by('order')))()
     
     responses_text = ""
     for field in fields:

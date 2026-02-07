@@ -373,18 +373,30 @@ class TestHandlersWithRealGuild:
     
     @pytest.mark.asyncio
     async def test_list_form_fields(self):
-        """Test listing form fields"""
+        """Test listing form fields including dropdown types"""
+        from core.models import Dropdown
+        
+        # Create a dropdown
+        dropdown = await sync_to_async(Dropdown.objects.create)(
+            guild=self.guild_settings,
+            name='Role Picker',
+            source_type='ROLES',
+            multiselect=False
+        )
+        
         # Create test fields
         field1 = await sync_to_async(FormField.objects.create)(
             guild=self.guild_settings,
-            label='Field1',
+            label='Your Name',
             field_type='text',
+            placeholder='Enter your name',
             order=1
         )
         field2 = await sync_to_async(FormField.objects.create)(
             guild=self.guild_settings,
-            label='Field2',
-            field_type='textarea',
+            label='Desired Role',
+            field_type='dropdown',
+            dropdown=dropdown,
             order=2
         )
         
@@ -393,12 +405,13 @@ class TestHandlersWithRealGuild:
         
         await handle_list_form_fields(self.bot, message, {}, self.guild_settings)
         
-        # Verify send was called
+        # Verify send was called with embed
         assert message.channel.send.called
         
         # Cleanup
-        await sync_to_async(field1.delete)()
         await sync_to_async(field2.delete)()
+        await sync_to_async(field1.delete)()
+        await sync_to_async(dropdown.delete)()
     
     @pytest.mark.asyncio
     async def test_reload_config(self):

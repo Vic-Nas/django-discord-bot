@@ -68,6 +68,11 @@ async def sync_guild_data(bot, guild_id):
     
     for db_channel in db_channels:
         if db_channel.discord_id in discord_channel_ids:
+            # Update name
+            discord_channel = guild.get_channel(db_channel.discord_id)
+            if discord_channel and db_channel.name != discord_channel.name:
+                db_channel.name = discord_channel.name
+                await sync_to_async(db_channel.save)()
             channels_synced += 1
         else:
             # Channel was deleted on Discord — remove from DB
@@ -83,7 +88,8 @@ async def sync_guild_data(bot, guild_id):
         if not exists:
             await sync_to_async(DiscordChannel.objects.create)(
                 discord_id=channel.id,
-                guild=guild_settings
+                guild=guild_settings,
+                name=channel.name
             )
             channels_added += 1
     

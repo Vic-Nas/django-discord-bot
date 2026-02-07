@@ -484,7 +484,7 @@ async def handle_set_server_mode(bot, message, params, args, guild_settings):
                 await sync_to_async(DiscordChannel.objects.update_or_create)(
                     discord_id=approvals_channel.id,
                     guild=guild_settings,
-                    defaults={}
+                    defaults={'name': approvals_channel.name}
                 )
         
         if not guild_settings.pending_channel_id:
@@ -496,7 +496,7 @@ async def handle_set_server_mode(bot, message, params, args, guild_settings):
                 await sync_to_async(DiscordChannel.objects.update_or_create)(
                     discord_id=pending_channel.id,
                     guild=guild_settings,
-                    defaults={}
+                    defaults={'name': pending_channel.name}
                 )
     
     await sync_to_async(guild_settings.save)()
@@ -767,20 +767,30 @@ async def handle_list_form_fields(bot, message, params, guild_settings):
     from core.models import FormField
     
     fields = await sync_to_async(
-        lambda: list(FormField.objects.filter(guild=guild_settings).order_by('order'))
+        lambda: list(FormField.objects.select_related('dropdown').filter(guild=guild_settings).order_by('order'))
     )()
     
     if not fields:
-        await message.channel.send("📋 No form fields configured yet.")
+        await message.channel.send("📋 No form fields configured yet. Add them in the admin panel.")
         return
     
     embed = discord.Embed(title="📋 Application Form Fields", color=discord.Color.blue())
     
     for field in fields:
         required_str = "✅ Required" if field.required else "⭕ Optional"
+        type_display = field.get_field_type_display()
+        
+        details = f"Type: `{type_display}` • {required_str}"
+        if field.field_type == 'dropdown' and field.dropdown:
+            source = field.dropdown.get_source_type_display()
+            multi = " (multiple)" if field.dropdown.multiselect else ""
+            details += f"\nDropdown: **{field.dropdown.name}** [{source}]{multi}"
+        if field.placeholder:
+            details += f"\nPlaceholder: *{field.placeholder}*"
+        
         embed.add_field(
             name=f"{field.label}",
-            value=f"Type: `{field.field_type}` • {required_str}",
+            value=details,
             inline=False
         )
     

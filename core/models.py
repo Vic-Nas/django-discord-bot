@@ -51,13 +51,59 @@ class DiscordChannel(models.Model):
     """Cached Discord channels"""
     discord_id = models.BigIntegerField()
     guild = models.ForeignKey(GuildSettings, on_delete=models.CASCADE, related_name='channels')
+    name = models.CharField(max_length=100, blank=True, default='')
     
     class Meta:
         db_table = 'discord_channels'
         unique_together = ['guild', 'discord_id']
     
     def __str__(self):
-        return f"Channel {self.discord_id}"
+        return self.name or f"Channel {self.discord_id}"
+
+
+class Dropdown(models.Model):
+    """Reusable dropdown definitions for form fields.
+    
+    Source types:
+    - ROLES: Auto-populated from guild's Discord roles
+    - CHANNELS: Auto-populated from guild's Discord channels
+    - CUSTOM: Admin defines options via DropdownOption entries
+    """
+    SOURCE_TYPES = [
+        ('ROLES', 'Guild Roles'),
+        ('CHANNELS', 'Guild Channels'),
+        ('CUSTOM', 'Custom Options'),
+    ]
+    
+    guild = models.ForeignKey(GuildSettings, on_delete=models.CASCADE, related_name='dropdowns')
+    name = models.CharField(max_length=100, help_text="Display name, e.g. 'Role Picker', 'Region'")
+    source_type = models.CharField(max_length=20, choices=SOURCE_TYPES, help_text="Where the options come from")
+    multiselect = models.BooleanField(default=False, help_text="Allow picking multiple options")
+    
+    class Meta:
+        db_table = 'dropdowns'
+        unique_together = ['guild', 'name']
+    
+    def __str__(self):
+        multi = " (multi)" if self.multiselect else ""
+        return f"{self.name} [{self.get_source_type_display()}]{multi}"
+
+
+class DropdownOption(models.Model):
+    """Custom options for CUSTOM-type dropdowns.
+    Not needed for ROLES/CHANNELS (those auto-populate from Discord).
+    """
+    dropdown = models.ForeignKey(Dropdown, on_delete=models.CASCADE, related_name='custom_options')
+    label = models.CharField(max_length=200, help_text="What the user sees")
+    value = models.CharField(max_length=200, help_text="What gets stored (can match label)")
+    order = models.IntegerField(default=0)
+    
+    class Meta:
+        db_table = 'dropdown_options'
+        ordering = ['order']
+    
+    def __str__(self):
+        return self.label
 
 
 class InviteRule(models.Model):
@@ -77,20 +123,30 @@ class InviteRule(models.Model):
 
 
 class FormField(models.Model):
-    """Dynamic form fields for approval applications"""
+    """Dynamic form fields for approval applications.
+    
+    For dropdown fields, link to a Dropdown model instead of raw JSON.
+    The Dropdown can auto-populate from guild roles/channels or use custom options.
+    """
     FIELD_TYPES = [
         ('text', 'Short Text'),
         ('textarea', 'Long Text'),
-        ('select', 'Dropdown'),
-        ('radio', 'Radio Buttons'),
-        ('checkbox', 'Checkboxes'),
+        ('dropdown', 'Dropdown (link a Dropdown below)'),
+        ('checkbox', 'Yes/No Checkbox'),
         ('file', 'File Upload'),
     ]
     
     guild = models.ForeignKey(GuildSettings, on_delete=models.CASCADE, related_name='form_fields')
-    label = models.CharField(max_length=200)
+    label = models.CharField(max_length=200, help_text="Question shown to the user")
     field_type = models.CharField(max_length=20, choices=FIELD_TYPES)
-    options = models.JSONField(null=True, blank=True)  # For select/radio/checkbox
+    dropdown = models.ForeignKey(
+        Dropdown, null=True, blank=True, on_delete=models.SET_NULL,
+        help_text="Required for 'Dropdown' field type. Create one under Dropdowns first."
+    )
+    placeholder = models.CharField(
+        max_length=200, blank=True,
+        help_text="Placeholder text shown inside text/textarea fields"
+    )
     required = models.BooleanField(default=True)
     order = models.IntegerField(default=0)
     
@@ -99,7 +155,7 @@ class FormField(models.Model):
         ordering = ['order']
     
     def __str__(self):
-        return f"{self.label} ({self.field_type})"
+        return f"{self.label} ({self.get_field_type_display()})"
 
 
 class Application(models.Model):
@@ -180,7 +236,11 @@ class CommandAction(models.Model):
     order = models.IntegerField(default=0)  # Execution order
     type = models.CharField(max_length=30, choices=ACTION_TYPES)
     name = models.CharField(max_length=100)  # Unique name within command, e.g., "send_welcome"
-    parameters = models.JSONField(default=dict)  # Type-specific config
+    parameters = models.JSONField(
+        default=dict,
+        help_text='Auto-managed by the bot. Only edit if you know what you\'re doing. '
+                  'Format depends on action type, e.g. {"text": "Hello"} for SEND_MESSAGE.'
+    )
     enabled = models.BooleanField(default=True)
     
     class Meta:
