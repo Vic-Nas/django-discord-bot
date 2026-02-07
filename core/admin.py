@@ -70,19 +70,42 @@ class DropdownOptionInline(admin.TabularInline):
 
 @admin.register(Dropdown)
 class DropdownAdmin(admin.ModelAdmin):
-    list_display = ('name', 'source_type', 'multiselect', 'guild')
+    list_display = ('name', 'source_type', 'multiselect', 'option_count', 'guild')
     list_filter = ('guild', 'source_type')
     inlines = [DropdownOptionInline]
+    filter_horizontal = ('roles', 'channels')
     fieldsets = (
         (None, {
             'fields': ('guild', 'name', 'source_type', 'multiselect'),
+        }),
+        ('Role Selection', {
+            'fields': ('roles',),
             'description': (
-                '<b>ROLES</b>: Options auto-populate from guild roles.<br>'
-                '<b>CHANNELS</b>: Options auto-populate from guild channels.<br>'
-                '<b>CUSTOM</b>: Define your own options below.'
+                'Pick which roles appear in this dropdown. '
+                'These come from Discord (synced by the <b>reload</b> command). '
+                'Leave empty to include ALL guild roles.'
+            ),
+        }),
+        ('Channel Selection', {
+            'fields': ('channels',),
+            'description': (
+                'Pick which channels appear in this dropdown. '
+                'These come from Discord (synced by the <b>reload</b> command). '
+                'Leave empty to include ALL guild channels.'
             ),
         }),
     )
+
+    def option_count(self, obj):
+        if obj.source_type == 'ROLES':
+            count = obj.roles.count()
+            return f"{count} roles" if count else "All roles"
+        elif obj.source_type == 'CHANNELS':
+            count = obj.channels.count()
+            return f"{count} channels" if count else "All channels"
+        else:
+            return f"{obj.custom_options.count()} options"
+    option_count.short_description = 'Options'
 
     def get_inline_instances(self, request, obj=None):
         """Only show DropdownOption inline for CUSTOM source type"""
@@ -90,6 +113,21 @@ class DropdownAdmin(admin.ModelAdmin):
         if obj and obj.source_type != 'CUSTOM':
             return []
         return inlines
+
+    def get_fieldsets(self, request, obj=None):
+        """Show only the relevant section based on source_type"""
+        base = list(super().get_fieldsets(request, obj))
+        if obj:
+            if obj.source_type == 'ROLES':
+                # Remove Channel Selection fieldset
+                return [fs for fs in base if fs[0] != 'Channel Selection']
+            elif obj.source_type == 'CHANNELS':
+                # Remove Role Selection fieldset
+                return [fs for fs in base if fs[0] != 'Role Selection']
+            else:  # CUSTOM
+                # Remove both Role and Channel fieldsets
+                return [fs for fs in base if fs[0] not in ('Role Selection', 'Channel Selection')]
+        return base
 
 
 @admin.register(DropdownOption)

@@ -65,9 +65,12 @@ class Dropdown(models.Model):
     """Reusable dropdown definitions for form fields.
     
     Source types:
-    - ROLES: Auto-populated from guild's Discord roles
-    - CHANNELS: Auto-populated from guild's Discord channels
+    - ROLES: Pick specific roles from the guild (synced by reload)
+    - CHANNELS: Pick specific channels from the guild (synced by reload)
     - CUSTOM: Admin defines options via DropdownOption entries
+    
+    For ROLES/CHANNELS: select which ones appear in the dropdown using
+    the roles/channels fields below. These are populated by the reload command.
     """
     SOURCE_TYPES = [
         ('ROLES', 'Guild Roles'),
@@ -80,6 +83,17 @@ class Dropdown(models.Model):
     source_type = models.CharField(max_length=20, choices=SOURCE_TYPES, help_text="Where the options come from")
     multiselect = models.BooleanField(default=False, help_text="Allow picking multiple options")
     
+    # For ROLES source: pick which guild roles appear in this dropdown
+    roles = models.ManyToManyField(
+        DiscordRole, blank=True, related_name='dropdowns',
+        help_text="Select roles to include. Leave empty = ALL guild roles. Only used when source is 'Guild Roles'."
+    )
+    # For CHANNELS source: pick which guild channels appear in this dropdown
+    channels = models.ManyToManyField(
+        DiscordChannel, blank=True, related_name='dropdowns',
+        help_text="Select channels to include. Leave empty = ALL guild channels. Only used when source is 'Guild Channels'."
+    )
+    
     class Meta:
         db_table = 'dropdowns'
         unique_together = ['guild', 'name']
@@ -87,6 +101,17 @@ class Dropdown(models.Model):
     def __str__(self):
         multi = " (multi)" if self.multiselect else ""
         return f"{self.name} [{self.get_source_type_display()}]{multi}"
+    
+    def get_options(self):
+        """Return list of {label, value} dicts for this dropdown's options."""
+        if self.source_type == 'ROLES':
+            qs = self.roles.all() if self.roles.exists() else DiscordRole.objects.filter(guild=self.guild)
+            return [{'label': r.name, 'value': str(r.discord_id)} for r in qs]
+        elif self.source_type == 'CHANNELS':
+            qs = self.channels.all() if self.channels.exists() else DiscordChannel.objects.filter(guild=self.guild)
+            return [{'label': c.name or f'#{c.discord_id}', 'value': str(c.discord_id)} for c in qs]
+        else:  # CUSTOM
+            return [{'label': o.label, 'value': o.value} for o in self.custom_options.all()]
 
 
 class DropdownOption(models.Model):

@@ -784,7 +784,15 @@ async def handle_list_form_fields(bot, message, params, guild_settings):
         if field.field_type == 'dropdown' and field.dropdown:
             source = field.dropdown.get_source_type_display()
             multi = " (multiple)" if field.dropdown.multiselect else ""
+            # Show actual selected options
+            options = await sync_to_async(field.dropdown.get_options)()
+            option_names = [o['label'] for o in options[:5]]
+            preview = ', '.join(option_names)
+            if len(options) > 5:
+                preview += f" (+{len(options) - 5} more)"
             details += f"\nDropdown: **{field.dropdown.name}** [{source}]{multi}"
+            if preview:
+                details += f"\nOptions: {preview}"
         if field.placeholder:
             details += f"\nPlaceholder: *{field.placeholder}*"
         
