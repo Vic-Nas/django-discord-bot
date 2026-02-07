@@ -615,9 +615,37 @@ async def handle_generate_access_token(bot, message, params, guild_settings):
     await message.author.send(tpl.format(server=selected_guild.name, url=access_url, expires=expires_str))
 
 
+async def _extract_role_ids_from_application(guild_settings, application):
+    """Extract Discord role IDs from ROLES-type dropdown responses in an application."""
+    from core.models import FormField
+
+    fields = await sync_to_async(
+        lambda: list(
+            FormField.objects.select_related('dropdown')
+            .filter(guild=guild_settings, field_type='dropdown')
+        )
+    )()
+
+    role_ids = []
+    for field in fields:
+        if not field.dropdown or field.dropdown.source_type != 'ROLES':
+            continue
+        raw = application.responses.get(str(field.id), '')
+        if not raw:
+            continue
+        for val in raw.split(','):
+            val = val.strip()
+            if val:
+                try:
+                    role_ids.append(int(val))
+                except ValueError:
+                    pass
+    return role_ids
+
+
 async def handle_approve_application(bot, message, params, args, guild_settings):
-    """APPROVE_APPLICATION: Approve a user and assign roles. Usage: @Bot approve @user role1,role2"""
-    from core.models import Application, DiscordRole
+    """APPROVE_APPLICATION: Approve a user and assign roles. Usage: @Bot approve @user [role1,role2]"""
+    from core.models import Application, DiscordRole, FormField
     from bot.handlers.templates import get_template_async
 
     if not message.guild:
@@ -653,6 +681,15 @@ async def handle_approve_application(bot, message, params, args, guild_settings)
             status='PENDING'
         ).order_by('-created_at').first()
     )()
+
+    # If no roles specified, extract roles the user chose in their application form
+    if not role_names and application and application.responses:
+        role_ids_from_form = await _extract_role_ids_from_application(guild_settings, application)
+        role_names = []
+        for rid in role_ids_from_form:
+            role = message.guild.get_role(rid)
+            if role:
+                role_names.append(role.name)
 
     # Remove Pending role
     if guild_settings.pending_role_id:
