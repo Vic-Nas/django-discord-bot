@@ -615,8 +615,8 @@ async def handle_generate_access_token(bot, message, params, guild_settings):
     await message.author.send(tpl.format(server=selected_guild.name, url=access_url, expires=expires_str))
 
 
-async def _extract_role_ids_from_application(guild_settings, application):
-    """Extract Discord role IDs from ROLES-type dropdown responses in an application."""
+async def _extract_selections_from_application(guild_settings, application):
+    """Extract Discord role IDs and channel IDs from dropdown responses in an application."""
     from core.models import FormField
 
     fields = await sync_to_async(
@@ -627,20 +627,26 @@ async def _extract_role_ids_from_application(guild_settings, application):
     )()
 
     role_ids = []
+    channel_ids = []
     for field in fields:
-        if not field.dropdown or field.dropdown.source_type != 'ROLES':
+        if not field.dropdown:
             continue
         raw = application.responses.get(str(field.id), '')
         if not raw:
             continue
+        ids = []
         for val in raw.split(','):
             val = val.strip()
             if val:
                 try:
-                    role_ids.append(int(val))
+                    ids.append(int(val))
                 except ValueError:
                     pass
-    return role_ids
+        if field.dropdown.source_type == 'ROLES':
+            role_ids.extend(ids)
+        elif field.dropdown.source_type == 'CHANNELS':
+            channel_ids.extend(ids)
+    return role_ids, channel_ids
 
 
 async def handle_approve_application(bot, message, params, args, guild_settings):
@@ -680,13 +686,18 @@ async def handle_approve_application(bot, message, params, args, guild_settings)
         ).order_by('-created_at').first()
     )()
 
-    # If no explicit @role mentions, extract roles the user chose in their application form
+    # If no explicit @role mentions, extract roles/channels the user chose in their application form
+    channels_to_allow = []
     if not explicit_roles and application and application.responses:
-        role_ids_from_form = await _extract_role_ids_from_application(guild_settings, application)
+        role_ids_from_form, channel_ids_from_form = await _extract_selections_from_application(guild_settings, application)
         for rid in role_ids_from_form:
             role = message.guild.get_role(rid)
             if role:
                 explicit_roles.append(role)
+        for cid in channel_ids_from_form:
+            ch = message.guild.get_channel(cid)
+            if ch:
+                channels_to_allow.append(ch)
 
     # Remove Pending role
     if guild_settings.pending_role_id:
@@ -700,6 +711,15 @@ async def handle_approve_application(bot, message, params, args, guild_settings)
         try:
             await member.add_roles(role)
             assigned_roles.append(role.name)
+        except Exception:
+            pass
+
+    # Grant access to selected channels
+    allowed_channels = []
+    for ch in channels_to_allow:
+        try:
+            await ch.set_permissions(member, read_messages=True, send_messages=True)
+            allowed_channels.append(f'#{ch.name}')
         except Exception:
             pass
 
@@ -719,9 +739,16 @@ async def handle_approve_application(bot, message, params, args, guild_settings)
     except discord.Forbidden:
         pass  # Can't DM user
 
-    roles_str = ', '.join(assigned_roles) if assigned_roles else 'none'
+    # Build confirmation summary
+    parts = []
+    if assigned_roles:
+        parts.append(f'Roles: {', '.join(assigned_roles)}')
+    if allowed_channels:
+        parts.append(f'Channels: {', '.join(allowed_channels)}')
+    summary = '. '.join(parts) if parts else 'No roles or channels assigned'
+
     template = await get_template_async(guild_settings, 'APPROVE_CONFIRM')
-    confirm_msg = template.format(user=target_user.display_name, roles=roles_str)
+    confirm_msg = template.format(user=target_user.display_name, roles=summary)
     await message.channel.send(confirm_msg)
 
 
