@@ -665,11 +665,12 @@ async def handle_approve_application(bot, message, params, args, guild_settings)
     if len(args) < 1:
         raise ExecutionError("Usage: `@Bot approve @user [@role ...]`")
 
-    # Parse mentioned user
-    if not message.mentions:
+    # Parse mentioned user (filter out the bot itself from mentions)
+    user_mentions = [u for u in message.mentions if u.id != bot.user.id]
+    if not user_mentions:
         raise ExecutionError("Please mention the user to approve: `@Bot approve @user`")
 
-    target_user = message.mentions[0]
+    target_user = user_mentions[0]
     member = message.guild.get_member(target_user.id)
     if not member:
         raise ExecutionError(f"User {target_user.name} is not in this server.")
@@ -781,10 +782,11 @@ async def handle_reject_application(bot, message, params, args, guild_settings):
     if len(args) < 1:
         raise ExecutionError("Usage: `@Bot reject @user [reason]`")
 
-    if not message.mentions:
+    user_mentions = [u for u in message.mentions if u.id != bot.user.id]
+    if not user_mentions:
         raise ExecutionError("Please mention the user to reject: `@Bot reject @user [reason]`")
 
-    target_user = message.mentions[0]
+    target_user = user_mentions[0]
     member = message.guild.get_member(target_user.id)
 
     reason = ' '.join(args[1:]) if len(args) > 1 else 'No reason provided'
