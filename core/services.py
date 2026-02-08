@@ -842,17 +842,22 @@ def _cmd_approve(gs, event):
 
 
 def _cmd_bulk_approve(gs, event, target_role):
-    """Approve all members with the given role who have submitted their form."""
+    """Approve all members with the given role."""
     actions = []
     members = event.get('members_with_role', [])
     summary = {'approved': 0, 'skipped': 0}
 
     for m in members:
-        app = Application.objects.filter(
-            guild=gs, user_id=m['id']).order_by('-created_at').first()
-        if not app or not app.responses:
-            summary['skipped'] += 1
-            continue
+        # get_or_create: works even without a prior Application
+        app, _created = Application.objects.get_or_create(
+            guild=gs, user_id=m['id'], status='PENDING',
+            defaults={
+                'user_name': m['name'],
+                'invite_code': 'bulk',
+                'inviter_name': f"Bulk approved by {event['author']['name']}",
+                'responses': {},
+            },
+        )
         actions.extend(_approve_user(gs, app, event['author'], event))
         summary['approved'] += 1
 
