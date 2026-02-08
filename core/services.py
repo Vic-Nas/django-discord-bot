@@ -640,7 +640,7 @@ def handle_command(event):
 def _cmd_help(gs, event):
     builtin_info = [
         ('help', 'Show this command list'),
-        ('addrule', 'Add an invite rule (Admin)'),
+        ('addrule', 'Add an invite rule: `@Bot addrule <code> @Role1 @Role2 [desc]` (Admin)'),
         ('delrule', 'Delete an invite rule (Admin)'),
         ('listrules', 'List all invite rules'),
         ('setmode', 'Set AUTO / APPROVAL mode (Admin)'),
@@ -666,28 +666,50 @@ def _cmd_help(gs, event):
 
 
 def _cmd_addrule(gs, event):
+    import re
     args = event['args']
     _require_admin(gs, event['author']['role_ids'])
-    if len(args) < 2:
-        raise _CmdError("Usage: `@Bot addrule <invite_code> <role1,role2,...> [description]`")
+    if len(args) < 1:
+        raise _CmdError("Usage: `@Bot addrule <invite_code> @Role1 @Role2 ... [description]`")
 
     invite_code = args[0]
-    role_names = args[1].split(',')
-    description = ' '.join(args[2:]) if len(args) > 2 else ''
+    role_mentions = event.get('role_mentions', [])
 
-    guild_roles = {r['name'].lower(): r for r in event.get('guild_roles', [])}
-    roles_to_add = []
-    for name in role_names:
-        name = name.strip()
-        r = guild_roles.get(name.lower())
-        if not r:
-            raise _CmdError(f"Role not found: `{name}`")
-        db_role, _ = DiscordRole.objects.get_or_create(
-            discord_id=r['id'], guild=gs, defaults={'name': r['name']})
-        roles_to_add.append(db_role)
+    if role_mentions:
+        # Primary path: @role mentions
+        roles_to_add = []
+        for r in role_mentions:
+            db_role, _ = DiscordRole.objects.get_or_create(
+                discord_id=r['id'], guild=gs, defaults={'name': r['name']})
+            roles_to_add.append(db_role)
+        # Description = remaining args that aren't the invite code or mention patterns
+        desc_parts = [a for a in args[1:] if not re.match(r'<@&\d+>', a)]
+        description = ' '.join(desc_parts)
+    else:
+        # Fallback: comma-separated text role names
+        if len(args) < 2:
+            raise _CmdError("Usage: `@Bot addrule <invite_code> @Role1 @Role2 ... [description]`")
+        role_names = args[1].split(',')
+        guild_roles = {r['name'].lower(): r for r in event.get('guild_roles', [])}
+        roles_to_add = []
+        for name in role_names:
+            name = name.strip()
+            r = guild_roles.get(name.lower())
+            if not r:
+                raise _CmdError(f"Role not found: `{name}`")
+            db_role, _ = DiscordRole.objects.get_or_create(
+                discord_id=r['id'], guild=gs, defaults={'name': r['name']})
+            roles_to_add.append(db_role)
+        description = ' '.join(args[2:]) if len(args) > 2 else ''
+
+    if not roles_to_add:
+        raise _CmdError("Please mention at least one role: `@Bot addrule <invite_code> @Role1 @Role2`")
 
     rule, _ = InviteRule.objects.get_or_create(
         guild=gs, invite_code=invite_code, defaults={'description': description})
+    if description and rule.description != description:
+        rule.description = description
+        rule.save()
     rule.roles.set(roles_to_add)
 
     role_str = ', '.join(r.name for r in roles_to_add)

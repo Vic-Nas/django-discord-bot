@@ -236,11 +236,11 @@ class TestAddruleDelrule:
     def test_addrule_creates_rule(self, test_guild):
         event = {
             'command': 'addrule',
-            'args': ['mycode', 'Members', 'Test rule'],
+            'args': ['mycode', '<@&333333333>', 'Test rule'],
             'guild_id': test_guild.guild_id,
             'channel_id': 555555555,
             'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
-            'guild_roles': [{'id': 333333333, 'name': 'Members'}],
+            'role_mentions': [{'id': 333333333, 'name': 'Members'}],
         }
         actions = handle_command(event)
         assert any('mycode' in a.get('content', '') for a in actions)
@@ -249,6 +249,47 @@ class TestAddruleDelrule:
         rule = InviteRule.objects.get(guild=test_guild, invite_code='mycode')
         assert rule.roles.count() == 1
         assert rule.roles.first().discord_id == 333333333
+        assert rule.description == 'Test rule'
+
+    def test_addrule_multi_roles(self, test_guild):
+        """Multiple @role mentions should all be added."""
+        event = {
+            'command': 'addrule',
+            'args': ['vipcode', '<@&333333333>', '<@&444444444>'],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+            'role_mentions': [
+                {'id': 333333333, 'name': 'Members'},
+                {'id': 444444444, 'name': 'VIP'},
+            ],
+        }
+        actions = handle_command(event)
+        assert any('vipcode' in a.get('content', '') for a in actions)
+
+        from core.models import InviteRule
+        rule = InviteRule.objects.get(guild=test_guild, invite_code='vipcode')
+        assert rule.roles.count() == 2
+        role_ids = set(rule.roles.values_list('discord_id', flat=True))
+        assert role_ids == {333333333, 444444444}
+
+    def test_addrule_text_fallback(self, test_guild):
+        """Comma-separated text role names still work as fallback."""
+        event = {
+            'command': 'addrule',
+            'args': ['oldstyle', 'Members', 'Old style'],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+            'guild_roles': [{'id': 333333333, 'name': 'Members'}],
+            'role_mentions': [],
+        }
+        actions = handle_command(event)
+        assert any('oldstyle' in a.get('content', '') for a in actions)
+
+        from core.models import InviteRule
+        rule = InviteRule.objects.get(guild=test_guild, invite_code='oldstyle')
+        assert rule.roles.count() == 1
 
     def test_addrule_requires_admin(self, test_guild):
         event = {
@@ -268,6 +309,7 @@ class TestAddruleDelrule:
             'guild_id': test_guild.guild_id,
             'channel_id': 555555555,
             'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+            'role_mentions': [],
         }
         actions = handle_command(event)
         assert any('Usage' in a.get('content', '') for a in actions)

@@ -278,11 +278,11 @@ class TestRuleManagementCycle:
         # 1. Add a rule
         add_event = {
             'command': 'addrule',
-            'args': ['testcode', 'Members', 'Integration test rule'],
+            'args': ['testcode', '<@&333333333>', 'Integration test rule'],
             'guild_id': test_guild.guild_id,
             'channel_id': 555555555,
             'author': admin,
-            'guild_roles': guild_roles,
+            'role_mentions': [{'id': 333333333, 'name': 'Members'}],
         }
         add_actions = handle_command(add_event)
         assert any('testcode' in a.get('content', '') for a in add_actions)
