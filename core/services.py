@@ -830,9 +830,11 @@ def _cmd_approve(gs, event):
     tpl = get_template(gs, 'APPROVE_CONFIRM')
     extras = []
     if extra_role_ids:
-        extras.append(f"roles: {', '.join(str(r) for r in extra_role_ids)}")
+        role_names = [r['name'] for r in role_mentions if r['id'] in extra_role_ids]
+        extras.append(f"roles: {', '.join(role_names)}")
     if extra_channel_ids:
-        extras.append(f"channels: {', '.join(str(c) for c in extra_channel_ids)}")
+        ch_names = [f"#{c['name']}" for c in channel_mentions]
+        extras.append(f"channels: {', '.join(ch_names)}")
     extras_str = '; '.join(extras) if extras else 'from rules/form'
     result.append({'type': 'reply', 'content': tpl.format(
         user=target['name'], roles=extras_str)})
