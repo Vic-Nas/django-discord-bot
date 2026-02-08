@@ -857,7 +857,7 @@ def _cmd_bulk_approve(gs, event, target_role, skip_form_check=False):
     members = event.get('members_with_role', [])
     summary = {'approved': 0, 'skipped': 0}
 
-    approved_details = []
+    approved_groups = {}  # (roles_key, channels_key) -> [user_ids]
     skipped_names = []
 
     for m in members:
@@ -878,20 +878,27 @@ def _cmd_bulk_approve(gs, event, target_role, skip_form_check=False):
         actions.extend(user_actions)
         summary['approved'] += 1
 
-        # Build per-user detail line
-        detail = f"• <@{m['id']}>"
-        if info['roles']:
-            detail += f" → {', '.join(info['roles'])}"
-        if info['channels']:
-            detail += f" | {', '.join(info['channels'])}"
-        approved_details.append(detail)
+        # Group users by their roles+channels combo
+        roles_key = ', '.join(info['roles']) if info['roles'] else ''
+        channels_key = ', '.join(info['channels']) if info['channels'] else ''
+        group_key = (roles_key, channels_key)
+        if group_key not in approved_groups:
+            approved_groups[group_key] = []
+        approved_groups[group_key].append(m['id'])
 
     # Build report
     lines = [f"✅ **Bulk approve complete — {summary['approved']} approved, {summary['skipped']} skipped**"]
-    if approved_details:
+    if approved_groups:
         lines.append('')
         lines.append('**Approved:**')
-        lines.extend(approved_details)
+        for (roles_key, channels_key), user_ids in approved_groups.items():
+            mentions = ', '.join(f'<@{uid}>' for uid in user_ids)
+            detail = f"• {mentions}"
+            if roles_key:
+                detail += f" → {roles_key}"
+            if channels_key:
+                detail += f" | {channels_key}"
+            lines.append(detail)
     if skipped_names:
         lines.append('')
         lines.append(f"**Skipped (form not filled):** {', '.join(skipped_names)}")
