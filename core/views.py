@@ -213,12 +213,14 @@ def form_view(request, guild_id):
                 guild=guild_settings,
                 status='PENDING',
                 user_name__icontains=username,
-            ).filter(responses={})  # only un-submitted
-            if matches.count() == 1:
-                app = matches.first()
-                # Redirect to the form with the user param
+            )
+            # Prefer applications that haven't submitted yet
+            unsubmitted = [a for a in matches if not a.responses]
+            candidates = unsubmitted if unsubmitted else list(matches)
+            if len(candidates) == 1:
+                app = candidates[0]
                 return redirect(f'/form/{guild_id}/?user={app.user_id}&invite={app.invite_code}')
-            elif matches.count() > 1:
+            elif len(candidates) > 1:
                 return render(request, 'form_lookup.html', {
                     'guild_name': guild_settings.guild_name,
                     'guild_id': guild_id,
@@ -236,18 +238,20 @@ def form_view(request, guild_id):
             'guild_id': guild_id,
         })
 
-    # ---- find pending application ----
-    try:
-        application = Application.objects.get(
-            guild=guild_settings,
-            user_id=int(user_id),
-            status='PENDING',
-        )
-    except Application.DoesNotExist:
-        return HttpResponse(
-            'No pending application found. You may have already submitted or your application was processed.',
-            status=404,
-        )
+    # ---- find or create pending application ----
+    # The user has the Pending role but may lack an Application record
+    # (e.g. manual role assignment, reload edge case, etc.)
+    application, _created = Application.objects.get_or_create(
+        guild=guild_settings,
+        user_id=int(user_id),
+        status='PENDING',
+        defaults={
+            'user_name': f'User#{user_id}',
+            'invite_code': invite_code or 'form',
+            'inviter_name': 'Form (direct)',
+            'responses': {},
+        },
+    )
 
     # ---- already submitted? ----
     if application.responses:

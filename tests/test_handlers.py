@@ -145,6 +145,7 @@ class TestHandleCommand:
         assert any(a['type'] == 'send_embed' for a in actions)
 
     def test_approve_no_application(self, test_guild):
+        """Approve should work even without a pre-existing Application (get_or_create)."""
         event = {
             'command': 'approve',
             'args': ['<@42>'],
@@ -153,9 +154,35 @@ class TestHandleCommand:
             'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
             'user_mentions': [{'id': 42, 'name': 'Nobody'}],
             'role_mentions': [],
+            'channel_mentions': [],
         }
         actions = handle_command(event)
-        assert any('No pending application' in a.get('content', '') for a in actions)
+        types = [a['type'] for a in actions]
+        assert 'remove_role' in types  # removes Pending
+        assert 'send_dm' in types  # DM user
+        # Application auto-created and deleted on approve
+        assert not Application.objects.filter(guild=test_guild, user_id=42, status='PENDING').exists()
+
+    def test_approve_with_extra_roles_and_channels(self, test_guild, test_application):
+        """Approve with @role and #channel mentions appends them to the approval."""
+        event = {
+            'command': 'approve',
+            'args': ['<@999888777>', '<@&333333333>', '<#444444444>'],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+            'user_mentions': [{'id': 999888777, 'name': 'TestUser#1234'}],
+            'role_mentions': [{'id': 333333333, 'name': 'Members'}],
+            'channel_mentions': [{'id': 444444444, 'name': 'general'}],
+        }
+        actions = handle_command(event)
+        types = [a['type'] for a in actions]
+        assert 'remove_role' in types
+        assert 'add_role' in types
+        assert 'set_permissions' in types
+        # Check channel permission was granted for the mentioned channel
+        perm_action = next(a for a in actions if a['type'] == 'set_permissions')
+        assert perm_action['channel_id'] == 444444444
 
 
 class TestHandleReaction:

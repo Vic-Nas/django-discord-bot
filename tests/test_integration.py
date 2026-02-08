@@ -68,6 +68,7 @@ class TestApprovalModeEndToEnd:
             'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
             'user_mentions': [{'id': 600, 'name': 'ApprovalUser'}],
             'role_mentions': [],
+            'channel_mentions': [],
         }
         approve_actions = handle_command(approve_event)
 
@@ -101,6 +102,7 @@ class TestApprovalModeEndToEnd:
             'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
             'user_mentions': [{'id': 700, 'name': 'RejectUser'}],
             'role_mentions': [],
+            'channel_mentions': [],
         }
         reject_actions = handle_command(reject_event)
 
@@ -248,6 +250,7 @@ class TestFormBasedApproval:
             'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
             'user_mentions': [{'id': 800, 'name': 'FormUser'}],
             'role_mentions': [],
+            'channel_mentions': [],
         }
         result = handle_command(approve_event)
 
@@ -339,7 +342,9 @@ class TestMemberLeaveEdgeCases:
         app.refresh_from_db()
         assert app.status == 'REJECTED'
 
-        # Admin tries to approve the now-rejected user
+        # Admin tries to approve the now-rejected user.
+        # With get_or_create, a new Application is auto-created and approved.
+        # The user is gone from the server, so Discord role ops are no-ops.
         approve_event = {
             'command': 'approve',
             'args': ['<@900>'],
@@ -348,9 +353,13 @@ class TestMemberLeaveEdgeCases:
             'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
             'user_mentions': [{'id': 900, 'name': 'LeaverUser'}],
             'role_mentions': [],
+            'channel_mentions': [],
         }
         result = handle_command(approve_event)
-        assert any('No pending application' in a.get('content', '') for a in result)
+        # Approve still goes through (creates + deletes application)
+        types = [a['type'] for a in result]
+        assert 'remove_role' in types
+        assert 'send_dm' in types
 
 
 class TestReactionEndToEnd:

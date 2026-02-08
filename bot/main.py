@@ -489,6 +489,11 @@ async def on_message(message):
             {'id': r.id, 'name': r.name}
             for r in message.role_mentions
         ]
+        # Channel mentions
+        event['channel_mentions'] = [
+            {'id': c.id, 'name': c.name}
+            for c in message.channel_mentions
+        ]
 
         # For commands that need guild data (reload, addrule)
         if command_name in ('reload', 'addrule'):

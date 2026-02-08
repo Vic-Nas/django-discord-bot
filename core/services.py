@@ -422,7 +422,7 @@ def handle_reaction(event):
 
 # ── Shared approve / reject ─────────────────────────────────────────────────
 
-def _approve_user(gs, application, admin, event, extra_role_ids=None):
+def _approve_user(gs, application, admin, event, extra_role_ids=None, extra_channel_ids=None):
     """Core approval logic - used by both commands and reactions."""
     actions = []
     user_id = application.user_id
@@ -448,7 +448,8 @@ def _approve_user(gs, application, admin, event, extra_role_ids=None):
             assigned_names.append(r.name)
             rule_role_ids.add(r.discord_id)
 
-    # Roles + channels from form
+    # Roles + channels from form (if user filled it)
+    all_channel_ids = set()
     if application.responses:
         role_ids, channel_ids = _extract_form_selections(gs, application)
         for rid in role_ids:
@@ -457,10 +458,18 @@ def _approve_user(gs, application, admin, event, extra_role_ids=None):
                 db_r = DiscordRole.objects.filter(guild=gs, discord_id=rid).first()
                 assigned_names.append(db_r.name if db_r else str(rid))
         for cid in channel_ids:
-            actions.append({'type': 'set_permissions', 'channel_id': cid, 'user_id': user_id,
-                           'allow': ['read_messages', 'send_messages']})
+            all_channel_ids.add(cid)
 
-    # Extra roles from @mentions in approve command
+    # Extra channels from #mentions in approve command (appended)
+    for cid in (extra_channel_ids or []):
+        all_channel_ids.add(cid)
+
+    # Grant channel access for all collected channels
+    for cid in all_channel_ids:
+        actions.append({'type': 'set_permissions', 'channel_id': cid, 'user_id': user_id,
+                       'allow': ['read_messages', 'send_messages']})
+
+    # Extra roles from @mentions in approve command (appended)
     for rid in (extra_role_ids or []):
         if not any(a.get('role_id') == rid for a in actions if a['type'] == 'add_role'):
             actions.append({'type': 'add_role', 'guild_id': gs.guild_id, 'user_id': user_id, 'role_id': rid})
@@ -628,7 +637,7 @@ def _cmd_help(gs, event):
         ('delrule', 'Delete an invite rule (Admin)'),
         ('listrules', 'List all invite rules'),
         ('setmode', 'Set AUTO / APPROVAL mode (Admin)'),
-        ('approve', 'Approve a pending user (Admin)'),
+        ('approve', 'Approve a pending user, optionally with extra @roles/#channels (Admin)'),
         ('reject', 'Reject a pending user (Admin)'),
         ('cleanup', 'Delete resolved bot messages in this channel (Admin)'),
         ('cleanall', 'Delete ALL bot messages except pending apps in this channel (Admin)'),
@@ -645,7 +654,8 @@ def _cmd_help(gs, event):
         lines.append(f'\u2022 **{cmd_name}** \u2014 {a.description or "Custom command"}')
 
     tpl = get_template(gs, 'HELP_MESSAGE')
-    return [{'type': 'reply', 'content': tpl.format(commands='\n'.join(lines))}]
+    return [{'type': 'reply', 'content': tpl.format(
+        commands='\n'.join(lines), bot_mention='@Bot')}]
 
 
 def _cmd_addrule(gs, event):
@@ -784,10 +794,11 @@ def _cmd_approve(gs, event):
     _require_admin(gs, event['author']['role_ids'])
     args = event['args']
     if len(args) < 1:
-        raise _CmdError("Usage: `@Bot approve @user [@role ...]` or `@Bot approve @Role`")
+        raise _CmdError("Usage: `@Bot approve @user [@role ...] [#channel ...]` or `@Bot approve @Role`")
 
     user_mentions = event.get('user_mentions', [])
     role_mentions = event.get('role_mentions', [])
+    channel_mentions = event.get('channel_mentions', [])
 
     # Bulk approve: role mentioned with no users
     if not user_mentions and role_mentions:
@@ -797,18 +808,34 @@ def _cmd_approve(gs, event):
         raise _CmdError("Please mention the user to approve: `@Bot approve @user`")
 
     target = user_mentions[0]
-    application = Application.objects.filter(
-        guild=gs, user_id=target['id'], status='PENDING'
-    ).order_by('-created_at').first()
-    if not application:
-        raise _CmdError(get_template(gs, 'NO_PENDING_APP').format(name=target['name']))
+
+    # get_or_create: approve works even if no Application exists
+    # (e.g. user has Pending role but wasn't tracked)
+    application, _created = Application.objects.get_or_create(
+        guild=gs, user_id=target['id'], status='PENDING',
+        defaults={
+            'user_name': target['name'],
+            'invite_code': 'manual',
+            'inviter_name': f"Approved by {event['author']['name']}",
+            'responses': {},
+        },
+    )
 
     extra_role_ids = [r['id'] for r in role_mentions if r['id'] != gs.bot_admin_role_id]
+    extra_channel_ids = [c['id'] for c in channel_mentions]
 
-    result = _approve_user(gs, application, event['author'], event, extra_role_ids=extra_role_ids)
+    result = _approve_user(gs, application, event['author'], event,
+                           extra_role_ids=extra_role_ids,
+                           extra_channel_ids=extra_channel_ids)
     tpl = get_template(gs, 'APPROVE_CONFIRM')
+    extras = []
+    if extra_role_ids:
+        extras.append(f"roles: {', '.join(str(r) for r in extra_role_ids)}")
+    if extra_channel_ids:
+        extras.append(f"channels: {', '.join(str(c) for c in extra_channel_ids)}")
+    extras_str = '; '.join(extras) if extras else 'from rules/form'
     result.append({'type': 'reply', 'content': tpl.format(
-        user=target['name'], roles=', '.join(str(r) for r in extra_role_ids) or 'from rules/form')})
+        user=target['name'], roles=extras_str)})
     return result
 
 
