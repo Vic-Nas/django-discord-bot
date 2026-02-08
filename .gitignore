@@ -40,4 +40,4 @@ Thumbs.db
 DEPLOYMENT.md
 staticfiles/*
 !staticfiles/.gitkeep
-logs.txt
+logs.txttest.db
