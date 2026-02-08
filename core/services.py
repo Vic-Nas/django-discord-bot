@@ -416,7 +416,8 @@ def handle_reaction(event):
 
     admin = event['admin']
     if emoji == '\u2705':
-        return _approve_user(gs, application, admin, event)
+        actions, _ = _approve_user(gs, application, admin, event)
+        return actions
     return _reject_user(gs, application, admin, event, reason='Rejected via reaction')
 
 
@@ -503,9 +504,15 @@ def _approve_user(gs, application, admin, event, extra_role_ids=None, extra_chan
         actions.append({'type': 'cleanup_channel', 'channel_id': gs.bounce_channel_id,
                        'count': 50, 'guild_id': gs.guild_id})
 
+    # Collect channel names for summary
+    channel_names = []
+    for cid in all_channel_ids:
+        db_c = DiscordChannel.objects.filter(guild=gs, discord_id=cid).first()
+        channel_names.append(f'#{db_c.name}' if db_c and db_c.name else str(cid))
+
     # Delete approved application
     application.delete()
-    return actions
+    return actions, {'roles': assigned_names, 'channels': channel_names}
 
 
 def _reject_user(gs, application, admin, event, reason='No reason provided'):
@@ -825,18 +832,16 @@ def _cmd_approve(gs, event):
     extra_role_ids = [r['id'] for r in role_mentions if r['id'] != gs.bot_admin_role_id]
     extra_channel_ids = [c['id'] for c in channel_mentions]
 
-    result = _approve_user(gs, application, event['author'], event,
-                           extra_role_ids=extra_role_ids,
-                           extra_channel_ids=extra_channel_ids)
+    result, info = _approve_user(gs, application, event['author'], event,
+                                  extra_role_ids=extra_role_ids,
+                                  extra_channel_ids=extra_channel_ids)
     tpl = get_template(gs, 'APPROVE_CONFIRM')
-    extras = []
-    if extra_role_ids:
-        role_names = [r['name'] for r in role_mentions if r['id'] in extra_role_ids]
-        extras.append(f"roles: {', '.join(role_names)}")
-    if extra_channel_ids:
-        ch_names = [f"#{c['name']}" for c in channel_mentions]
-        extras.append(f"channels: {', '.join(ch_names)}")
-    extras_str = '; '.join(extras) if extras else 'from rules/form'
+    parts = []
+    if info['roles']:
+        parts.append(', '.join(info['roles']))
+    if info['channels']:
+        parts.append(', '.join(info['channels']))
+    extras_str = '; '.join(parts) if parts else 'from rules'
     result.append({'type': 'reply', 'content': tpl.format(
         user=target['name'], roles=extras_str)})
     return result
@@ -852,6 +857,9 @@ def _cmd_bulk_approve(gs, event, target_role, skip_form_check=False):
     members = event.get('members_with_role', [])
     summary = {'approved': 0, 'skipped': 0}
 
+    approved_details = []
+    skipped_names = []
+
     for m in members:
         app, _created = Application.objects.get_or_create(
             guild=gs, user_id=m['id'], status='PENDING',
@@ -864,13 +872,32 @@ def _cmd_bulk_approve(gs, event, target_role, skip_form_check=False):
         )
         if not skip_form_check and not app.responses:
             summary['skipped'] += 1
+            skipped_names.append(m['name'])
             continue
-        actions.extend(_approve_user(gs, app, event['author'], event))
+        user_actions, info = _approve_user(gs, app, event['author'], event)
+        actions.extend(user_actions)
         summary['approved'] += 1
 
-    report = get_template(gs, 'BULK_APPROVE_RESULT').format(
-        approved=summary['approved'], skipped=summary['skipped'])
-    actions.append({'type': 'reply', 'content': report})
+        # Build per-user detail line
+        detail = f"• <@{m['id']}>"
+        if info['roles']:
+            detail += f" → {', '.join(info['roles'])}"
+        if info['channels']:
+            detail += f" | {', '.join(info['channels'])}"
+        approved_details.append(detail)
+
+    # Build report
+    lines = [f"✅ **Bulk approve complete — {summary['approved']} approved, {summary['skipped']} skipped**"]
+    if approved_details:
+        lines.append('')
+        lines.append('**Approved:**')
+        lines.extend(approved_details)
+    if skipped_names:
+        lines.append('')
+        lines.append(f"**Skipped (form not filled):** {', '.join(skipped_names)}")
+        lines.append('💡 Use `@Bot approve noform @Role` to approve without form.')
+
+    actions.append({'type': 'reply', 'content': '\n'.join(lines)})
     return actions
 
 
