@@ -9,6 +9,7 @@ Zero business logic here. All decisions made by core.services.
 
 import os
 import sys
+import asyncio
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -207,6 +208,7 @@ async def _execute_one(action, context=None):
                     deleted += 1
                     if deleted >= count:
                         break
+                    await asyncio.sleep(0.5)  # avoid Discord rate limits
                 except:
                     pass
 
