@@ -140,8 +140,7 @@ I need this to manage BotAdmin role assignments and channel permissions.""",
 
     'NO_PENDING_APP': """No pending application for {name}""",
 
-    'BULK_APPROVE_RESULT': """✅ **Bulk approve complete — {approved} approved**
-⏭️ Skipped (form not filled): {skipped}""",
+    'BULK_APPROVE_RESULT': """✅ **Bulk approve complete — {approved} approved**""",
 
     # ── List commands ────────────────────────────────────────────────────
 
@@ -201,9 +200,12 @@ async def get_template_async(guild_settings, template_type):
 
 
 def init_default_templates():
-    """Initialize default templates in database (call during setup)"""
+    """Initialize or update default templates in database (call during setup)."""
     for template_type, content in DEFAULT_TEMPLATES.items():
-        MessageTemplate.objects.get_or_create(
+        obj, created = MessageTemplate.objects.get_or_create(
             template_type=template_type,
             defaults={'default_content': content}
         )
+        if not created and obj.default_content != content:
+            obj.default_content = content
+            obj.save(update_fields=['default_content'])

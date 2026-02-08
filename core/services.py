@@ -845,7 +845,7 @@ def _cmd_bulk_approve(gs, event, target_role):
     """Approve all members with the given role."""
     actions = []
     members = event.get('members_with_role', [])
-    summary = {'approved': 0, 'skipped': 0}
+    approved = 0
 
     for m in members:
         # get_or_create: works even without a prior Application
@@ -859,10 +859,10 @@ def _cmd_bulk_approve(gs, event, target_role):
             },
         )
         actions.extend(_approve_user(gs, app, event['author'], event))
-        summary['approved'] += 1
+        approved += 1
 
     report = get_template(gs, 'BULK_APPROVE_RESULT').format(
-        approved=summary['approved'], skipped=summary['skipped'])
+        approved=approved, skipped=0)
     actions.append({'type': 'reply', 'content': report})
     return actions
 
