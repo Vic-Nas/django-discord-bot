@@ -29,7 +29,7 @@ The bot never contains business logic — it translates Discord events to dicts,
 
 ## Deploy to Railway
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.com?referralCode=ZIdvo-)
 
 ### Setup (2 services):
 1. **Web Service** (auto-deployed from Dockerfile)
