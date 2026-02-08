@@ -1,31 +1,30 @@
 """
 Django service layer — ALL business logic lives here.
 
-The bot sends events as simple dicts. This module processes them
-using Django ORM and returns a list of actions for the bot to execute.
+Two systems work together:
+  1. **Automations** (data-driven):  Trigger → Actions, configured via admin.
+     Handles: member join flows, custom commands, form events.
+  2. **Built-in commands** (code): approve, reject, addrule, etc.
+     Complex stateful logic that doesn't fit in JSON config.
 
-Action format: {"type": "...", ...params}
-Supported types:
-  - send_message:    {channel_id, content}
-  - send_embed:      {channel_id, embed}
-  - send_dm:         {user_id, content}
-  - add_role:        {guild_id, user_id, role_id, reason?}
-  - remove_role:     {guild_id, user_id, role_id}
-  - edit_message:    {channel_id, message_id, embed}
-  - clear_reactions: {channel_id, message_id}
-  - set_permissions: {channel_id, user_id, allow}
-  - set_topic:       {channel_id, topic}
-  - create_role:     {guild_id, name, color}
-  - create_channel:  {guild_id, name, overwrites}
+The bot sends events as simple dicts.  This module returns action dicts
+for the bot to execute on Discord.
+
+Action dict types:
+  send_message, send_embed, send_embed_tracked, send_dm,
+  add_role, remove_role, edit_message, clear_reactions,
+  set_permissions, set_topic, ensure_resources, cleanup_channel, reply
 """
 
 import os
 import secrets
 from datetime import timedelta
+
 from django.utils import timezone
+
 from .models import (
     GuildSettings, DiscordRole, DiscordChannel, InviteRule,
-    Application, BotCommand, CommandAction, AccessToken, FormField,
+    Application, FormField, AccessToken, Automation,
 )
 from bot.handlers.templates import get_template
 
@@ -37,6 +36,34 @@ def _get_guild(guild_id):
         return GuildSettings.objects.get(guild_id=guild_id)
     except GuildSettings.DoesNotExist:
         return None
+
+
+def _resolve_channel(gs, ref):
+    """Map a channel reference ('bounce', 'pending', or int) to a channel ID."""
+    if not ref:
+        return None
+    if ref == 'bounce':
+        return gs.bounce_channel_id
+    if ref == 'pending':
+        return gs.pending_channel_id
+    if isinstance(ref, int):
+        return ref
+    return None
+
+
+def _resolve_role_id(gs, config):
+    """Map a role config to a Discord role ID."""
+    if 'role_id' in config:
+        return config['role_id']
+    role_ref = config.get('role', '')
+    if role_ref == 'pending':
+        return gs.pending_role_id
+    if isinstance(role_ref, int):
+        return role_ref
+    if role_ref:
+        r = DiscordRole.objects.filter(guild=gs, name__iexact=role_ref).first()
+        return r.discord_id if r else None
+    return None
 
 
 def _resolve_display_value(field, raw_value):
@@ -53,30 +80,30 @@ def _resolve_display_value(field, raw_value):
         names = []
         for rid in ids:
             try:
-                role = DiscordRole.objects.get(guild=field.guild, discord_id=int(rid))
-                names.append(role.name)
+                r = DiscordRole.objects.get(guild=field.guild, discord_id=int(rid))
+                names.append(r.name)
             except (DiscordRole.DoesNotExist, ValueError):
                 names.append(rid)
         return ', '.join(names)
-    elif source == 'CHANNELS':
+    if source == 'CHANNELS':
         names = []
         for cid in ids:
             try:
-                ch = DiscordChannel.objects.get(guild=field.guild, discord_id=int(cid))
-                names.append(f'#{ch.name}' if ch.name else cid)
+                c = DiscordChannel.objects.get(guild=field.guild, discord_id=int(cid))
+                names.append(f'#{c.name}' if c.name else cid)
             except (DiscordChannel.DoesNotExist, ValueError):
                 names.append(cid)
         return ', '.join(names)
-    elif source == 'CUSTOM':
+    if source == 'CUSTOM':
         option_map = {o.value: o.label for o in field.dropdown.custom_options.all()}
         return ', '.join(option_map.get(v, v) for v in ids)
     return raw_value
 
 
-def _extract_form_selections(guild_settings, application):
+def _extract_form_selections(gs, application):
     """Extract role IDs and channel IDs from dropdown responses."""
     fields = FormField.objects.select_related('dropdown').filter(
-        guild=guild_settings, field_type='dropdown'
+        guild=gs, field_type='dropdown',
     )
     role_ids, channel_ids = [], []
     for field in fields:
@@ -87,8 +114,6 @@ def _extract_form_selections(guild_settings, application):
             continue
         for val in raw.split(','):
             val = val.strip()
-            if not val:
-                continue
             try:
                 int_val = int(val)
             except ValueError:
@@ -100,153 +125,266 @@ def _extract_form_selections(guild_settings, application):
     return role_ids, channel_ids
 
 
-# ── Event handlers ───────────────────────────────────────────────────────────
+# ── Generic Automation Engine ────────────────────────────────────────────────
 
-def handle_member_join(event):
-    """Process member_join event. Returns list of actions."""
-    guild_id = event['guild_id']
+def process_event(trigger_type, event):
+    """Find matching automations and execute their actions."""
+    guild_id = event.get('guild_id')
     gs = _get_guild(guild_id)
     if not gs:
         return []
 
-    member = event['member']
+    event['mode'] = gs.mode  # inject for trigger matching
+
+    automations = Automation.objects.filter(
+        guild=gs, trigger=trigger_type, enabled=True,
+    ).prefetch_related('actions')
+
+    results = []
+    for auto in automations:
+        if not _trigger_matches(auto.trigger_config, event):
+            continue
+        for action in auto.actions.filter(enabled=True).order_by('order'):
+            results.extend(_process_action(action, gs, event))
+    return results
+
+
+def _trigger_matches(config, event):
+    """Return True if every key in trigger_config matches the event."""
+    if not config:
+        return True
+    for key, value in config.items():
+        if key == 'mode' and event.get('mode') != value:
+            return False
+        if key == 'invite_code' and event.get('invite', {}).get('code') != value:
+            return False
+        if key == 'name' and event.get('command') != value:
+            return False
+        if key == 'emoji' and event.get('emoji') != value:
+            return False
+    return True
+
+
+def _process_action(action, gs, event):
+    """Convert an Action model instance into bot action dicts."""
+    c = action.config or {}
+    t = action.action_type
+    member = event.get('member', {})
+    user_id = member.get('id') or event.get('user_id')
+
+    if t == 'SEND_MESSAGE':
+        ch = _resolve_channel(gs, c.get('channel', 'bounce'))
+        tpl_name = c.get('template')
+        content = c.get('content', '')
+        if tpl_name:
+            content = _format_template(gs, tpl_name, event)
+        return [{'type': 'send_message', 'channel_id': ch, 'content': content}] if ch and content else []
+
+    if t == 'SEND_DM':
+        tpl_name = c.get('template')
+        content = c.get('content', '')
+        if tpl_name:
+            content = _format_template(gs, tpl_name, event)
+        return [{'type': 'send_dm', 'user_id': user_id, 'content': content}] if user_id and content else []
+
+    if t == 'SEND_EMBED':
+        ch = _resolve_channel(gs, c.get('channel', 'bounce'))
+        if not ch:
+            return []
+        tpl_name = c.get('template', '')
+        track = c.get('track', False)
+
+        # Special case: 'application' template builds the application embed
+        if tpl_name == 'application':
+            return _build_application_embed(gs, event, ch, track)
+
+        # Generic log embeds
+        if tpl_name:
+            text = _format_template(gs, tpl_name, event)
+            embed = {'description': text, 'color': c.get('color', 0x2ecc71)}
+            return [{'type': 'send_embed', 'channel_id': ch, 'embed': embed}]
+        return []
+
+    if t == 'ADD_ROLE':
+        if c.get('from_rule'):
+            return _roles_from_invite_rule(gs, event)
+        if c.get('from_form'):
+            return _roles_from_form(gs, event)
+        role_id = _resolve_role_id(gs, c)
+        if role_id and user_id:
+            return [{'type': 'add_role', 'guild_id': gs.guild_id, 'user_id': user_id,
+                     'role_id': role_id, 'reason': c.get('reason', '')}]
+        return []
+
+    if t == 'REMOVE_ROLE':
+        role_id = _resolve_role_id(gs, c)
+        if role_id and user_id:
+            return [{'type': 'remove_role', 'guild_id': gs.guild_id, 'user_id': user_id, 'role_id': role_id}]
+        return []
+
+    if t == 'SET_TOPIC':
+        ch = _resolve_channel(gs, c.get('channel', 'pending'))
+        tpl_name = c.get('template')
+        content = c.get('content', '')
+        if tpl_name:
+            content = _format_template(gs, tpl_name, event)
+        return [{'type': 'set_topic', 'channel_id': ch, 'topic': content}] if ch else []
+
+    if t == 'SET_PERMS':
+        if c.get('from_form'):
+            return _channel_perms_from_form(gs, event)
+        ch = _resolve_channel(gs, c.get('channel'))
+        if ch and user_id:
+            return [{'type': 'set_permissions', 'channel_id': ch, 'user_id': user_id,
+                     'allow': c.get('allow', ['read_messages', 'send_messages'])}]
+        return []
+
+    if t == 'CLEANUP':
+        ch = _resolve_channel(gs, c.get('channel', 'bounce'))
+        if ch:
+            return [{'type': 'cleanup_channel', 'channel_id': ch,
+                     'count': c.get('count', 10), 'guild_id': gs.guild_id}]
+        return []
+
+    return []
+
+
+# ── Automation action helpers ────────────────────────────────────────────────
+
+def _format_template(gs, template_name, event):
+    """Render a named template with event data."""
+    tpl = get_template(gs, template_name)
+    member = event.get('member', {})
     invite = event.get('invite', {})
-    invite_code = invite.get('code', 'unknown')
-    inviter_id = invite.get('inviter_id')
-    inviter_name = invite.get('inviter_name', 'Unknown')
-
-    actions = []
-
-    if gs.mode == 'AUTO':
-        actions += _handle_auto_join(gs, member, invite_code, inviter_name)
-    else:
-        actions += _handle_approval_join(gs, member, invite_code, inviter_id, inviter_name)
-
-    # Log the join
-    actions += _log_join(gs, member, invite_code, inviter_name)
-
-    return actions
+    return tpl.format(
+        user=f"<@{member.get('id', '')}>",
+        invite_code=invite.get('code', 'unknown'),
+        inviter=invite.get('inviter_name', 'Unknown'),
+        roles='Pending' if event.get('mode') == 'APPROVAL' else 'See rules',
+        pending=f"<@&{gs.pending_role_id}>" if gs.pending_role_id else '@Pending',
+        server=gs.guild_name,
+        form_url=event.get('form_url', ''),
+        message='',
+        admin='',
+        reason='',
+        bot_role='',
+    )
 
 
-def _handle_auto_join(gs, member, invite_code, inviter_name):
-    """AUTO mode: assign roles immediately."""
-    actions = []
+def _build_application_embed(gs, event, channel_id, track):
+    """Create Application record and return embed action."""
+    member = event.get('member', {})
 
-    # Find rule
-    rule = InviteRule.objects.prefetch_related('roles').filter(
-        guild=gs, invite_code=invite_code
-    ).first()
-    if not rule:
-        rule = InviteRule.objects.prefetch_related('roles').filter(
-            guild=gs, invite_code='default'
-        ).first()
-    if not rule:
-        return actions
-
-    # Assign roles from rule
-    for db_role in rule.roles.all():
-        actions.append({
-            'type': 'add_role',
-            'guild_id': gs.guild_id,
-            'user_id': member['id'],
-            'role_id': db_role.discord_id,
-            'reason': f'Auto-assigned via invite {invite_code}',
-        })
-
-    return actions
-
-
-def _handle_approval_join(gs, member, invite_code, inviter_id, inviter_name):
-    """APPROVAL mode: assign Pending role, create Application, send form link."""
-    actions = []
-
-    # Assign Pending role
-    if gs.pending_role_id:
-        actions.append({
-            'type': 'add_role',
-            'guild_id': gs.guild_id,
-            'user_id': member['id'],
-            'role_id': gs.pending_role_id,
-            'reason': 'Pending approval',
-        })
-
-    # Create Application record
-    application = Application.objects.create(
+    app = Application.objects.create(
         guild=gs,
         user_id=member['id'],
-        user_name=member['name'],
-        invite_code=invite_code,
-        inviter_id=inviter_id,
-        inviter_name=inviter_name,
+        user_name=member.get('name', str(member['id'])),
+        invite_code=event.get('invite', {}).get('code', 'unknown'),
+        inviter_id=event.get('invite', {}).get('inviter_id'),
+        inviter_name=event.get('invite', {}).get('inviter_name', 'Unknown'),
         status='PENDING',
         responses={},
     )
 
-    # Check if form fields exist
-    fields = list(FormField.objects.filter(guild=gs))
-    if not fields:
-        # No form — post directly to approvals
-        actions += _build_application_embed(gs, application)
-    else:
-        # Set pending channel topic with form link
-        app_url = os.environ.get('APP_URL', 'https://your-domain.com').rstrip('/')
-        if not app_url.startswith(('http://', 'https://')):
-            app_url = f'https://{app_url}'
-        form_url = f"{app_url}/form/{gs.guild_id}/"
-        if gs.pending_channel_id:
-            template = get_template(gs, 'PENDING_CHANNEL_TOPIC')
-            actions.append({
-                'type': 'set_topic',
-                'channel_id': gs.pending_channel_id,
-                'topic': template.format(form_url=form_url),
-            })
-
-    return actions
-
-
-def _log_join(gs, member, invite_code, inviter_name):
-    """Build log message for #bounce channel."""
-    if not gs.logs_channel_id:
-        return []
-
-    template_type = 'JOIN_LOG_AUTO' if gs.mode == 'AUTO' else 'JOIN_LOG_APPROVAL'
-    template = get_template(gs, template_type)
-
-    text = template.format(
-        user=f"<@{member['id']}>",
-        invite_code=invite_code,
-        inviter=inviter_name,
-        roles='Pending' if gs.mode == 'APPROVAL' else 'See above',
-        pending=f"<@&{gs.pending_role_id}>" if gs.pending_role_id else '@Pending',
-    )
-
-    return [{
-        'type': 'send_embed',
-        'channel_id': gs.logs_channel_id,
-        'embed': {'description': text, 'color': 0x2ecc71},
-    }]
-
-
-def _build_application_embed(gs, application):
-    """Build the application embed for #approvals (no form fields case)."""
-    if not gs.approvals_channel_id:
-        return []
+    has_form = FormField.objects.filter(guild=gs).exists()
+    app_url = os.environ.get('APP_URL', 'https://your-domain.com').rstrip('/')
+    if not app_url.startswith(('http://', 'https://')):
+        app_url = f'https://{app_url}'
+    form_url = f"{app_url}/form/{gs.guild_id}/"
 
     embed = {
-        'title': f'📋 Application #{application.id} — {application.user_name}',
+        'title': f'\U0001f4cb Application #{app.id} \u2014 {app.user_name}',
         'color': 0xFFA500,
         'fields': [
-            {'name': 'User', 'value': f'<@{application.user_id}>', 'inline': True},
-            {'name': 'Invite', 'value': application.invite_code, 'inline': True},
-            {'name': 'Invited by', 'value': application.inviter_name or 'Unknown', 'inline': True},
-            {'name': 'Actions', 'value': (
-                f'✅ `@Bot approve <@{application.user_id}>`\n'
-                f'❌ `@Bot reject <@{application.user_id}> [reason]`'
-            ), 'inline': False},
+            {'name': 'User', 'value': f'<@{app.user_id}>', 'inline': True},
+            {'name': 'Invite', 'value': app.invite_code, 'inline': True},
+            {'name': 'Invited by', 'value': app.inviter_name or 'Unknown', 'inline': True},
         ],
     }
+    if has_form:
+        embed['fields'].append({'name': 'Form', 'value': f'\u23f3 [Not submitted yet]({form_url})', 'inline': False})
+    embed['fields'].append({
+        'name': 'Actions',
+        'value': (
+            f'\u2705 `@Bot approve <@{app.user_id}>`\n'
+            f'\u274c `@Bot reject <@{app.user_id}> [reason]`\n'
+            'Or react \u2705 / \u274c'
+        ),
+        'inline': False,
+    })
 
-    return [{'type': 'send_embed', 'channel_id': gs.approvals_channel_id, 'embed': embed}]
+    action_dict = {
+        'type': 'send_embed_tracked',
+        'channel_id': channel_id,
+        'embed': embed,
+        'application_id': app.id,
+    }
+    results = [action_dict]
+
+    if has_form and gs.pending_channel_id:
+        tpl = get_template(gs, 'PENDING_CHANNEL_TOPIC')
+        results.append({'type': 'set_topic', 'channel_id': gs.pending_channel_id,
+                        'topic': tpl.format(form_url=form_url)})
+
+    return results
+
+
+def _roles_from_invite_rule(gs, event):
+    """Resolve invite rule -> add_role actions."""
+    invite = event.get('invite', {})
+    code = invite.get('code', 'unknown')
+    member = event.get('member', {})
+    user_id = member.get('id') or event.get('user_id')
+    if not user_id:
+        return []
+
+    rule = InviteRule.objects.prefetch_related('roles').filter(guild=gs, invite_code=code).first()
+    if not rule:
+        rule = InviteRule.objects.prefetch_related('roles').filter(guild=gs, invite_code='default').first()
+    if not rule:
+        return []
+
+    return [
+        {'type': 'add_role', 'guild_id': gs.guild_id, 'user_id': user_id,
+         'role_id': r.discord_id, 'reason': f'Auto-assigned via invite {code}'}
+        for r in rule.roles.all()
+    ]
+
+
+def _roles_from_form(gs, event):
+    """Resolve form selections -> add_role actions."""
+    user_id = event.get('member', {}).get('id') or event.get('user_id')
+    app = (Application.objects.filter(guild=gs, user_id=user_id, status='PENDING')
+           .order_by('-created_at').first() if user_id else None)
+    if not app or not app.responses:
+        return []
+    role_ids, _ = _extract_form_selections(gs, app)
+    return [
+        {'type': 'add_role', 'guild_id': gs.guild_id, 'user_id': user_id, 'role_id': rid}
+        for rid in role_ids
+    ]
+
+
+def _channel_perms_from_form(gs, event):
+    """Resolve form selections -> set_permissions actions."""
+    user_id = event.get('member', {}).get('id') or event.get('user_id')
+    app = (Application.objects.filter(guild=gs, user_id=user_id, status='PENDING')
+           .order_by('-created_at').first() if user_id else None)
+    if not app or not app.responses:
+        return []
+    _, channel_ids = _extract_form_selections(gs, app)
+    return [
+        {'type': 'set_permissions', 'channel_id': cid, 'user_id': user_id,
+         'allow': ['read_messages', 'send_messages']}
+        for cid in channel_ids
+    ]
+
+
+# ── Event entry points (called by bot) ──────────────────────────────────────
+
+def handle_member_join(event):
+    """Process member_join via automations."""
+    return process_event('MEMBER_JOIN', event)
 
 
 def handle_member_remove(event):
@@ -260,104 +398,111 @@ def handle_member_remove(event):
 
 
 def handle_reaction(event):
-    """Handle ✅/❌ reaction on application embed."""
-    guild_id = event['guild_id']
-    gs = _get_guild(guild_id)
-    if not gs:
+    """Handle checkmark/cross reaction on application embeds."""
+    emoji = event.get('emoji')
+    if emoji not in ('\u2705', '\u274c'):
         return []
-
-    emoji = event['emoji']
-    if emoji not in ('✅', '❌'):
-        return []
-
     app_id = event.get('application_id')
     if not app_id:
         return []
-
     try:
         application = Application.objects.get(id=app_id, status='PENDING')
     except Application.DoesNotExist:
         return []
 
+    gs = _get_guild(event['guild_id'])
+    if not gs:
+        return []
+
     admin = event['admin']
-
-    # Check BotAdmin permission (bot verified this before calling)
-    if emoji == '✅':
-        return _approve_via_reaction(gs, application, admin, event)
-    else:
-        return _reject_via_reaction(gs, application, admin, event)
+    if emoji == '\u2705':
+        return _approve_user(gs, application, admin, event)
+    return _reject_user(gs, application, admin, event, reason='Rejected via reaction')
 
 
-def _approve_via_reaction(gs, application, admin, event):
-    """Approve application from reaction."""
+# ── Shared approve / reject ─────────────────────────────────────────────────
+
+def _approve_user(gs, application, admin, event, extra_role_ids=None):
+    """Core approval logic - used by both commands and reactions."""
     actions = []
-    app_id = application.id
-    guild_id = gs.guild_id
-
-    # Find matching invite rule
-    rule = InviteRule.objects.prefetch_related('roles').filter(
-        guild=gs, invite_code=application.invite_code
-    ).first()
-    if not rule:
-        rule = InviteRule.objects.prefetch_related('roles').filter(
-            guild=gs, invite_code='default'
-        ).first()
+    user_id = application.user_id
 
     # Remove Pending role
     if gs.pending_role_id:
-        actions.append({
-            'type': 'remove_role',
-            'guild_id': guild_id,
-            'user_id': application.user_id,
-            'role_id': gs.pending_role_id,
-        })
+        actions.append({'type': 'remove_role', 'guild_id': gs.guild_id,
+                        'user_id': user_id, 'role_id': gs.pending_role_id})
 
-    # Assign roles from rule
-    role_names = []
+    # Roles from invite rule
+    rule = InviteRule.objects.prefetch_related('roles').filter(
+        guild=gs, invite_code=application.invite_code).first()
+    if not rule:
+        rule = InviteRule.objects.prefetch_related('roles').filter(
+            guild=gs, invite_code='default').first()
+
+    assigned_names = []
+    rule_role_ids = set()
     if rule:
-        for db_role in rule.roles.all():
-            actions.append({
-                'type': 'add_role',
-                'guild_id': guild_id,
-                'user_id': application.user_id,
-                'role_id': db_role.discord_id,
-                'reason': f'Application approved by {admin["name"]}',
-            })
-            role_names.append(db_role.name)
+        for r in rule.roles.all():
+            actions.append({'type': 'add_role', 'guild_id': gs.guild_id, 'user_id': user_id,
+                           'role_id': r.discord_id, 'reason': f'Approved by {admin["name"]}'})
+            assigned_names.append(r.name)
+            rule_role_ids.add(r.discord_id)
 
-    # Update embed
-    msg_id = event.get('message_id')
-    ch_id = event.get('channel_id')
-    if msg_id and ch_id:
-        embed = event.get('original_embed', {})
-        embed['color'] = 0x2ecc71  # green
-        if 'fields' not in embed:
-            embed['fields'] = []
-        embed['fields'].append({'name': 'Status', 'value': f'✅ Approved by <@{admin["id"]}>', 'inline': False})
-        embed['fields'].append({'name': 'Roles Assigned', 'value': ', '.join(role_names) or 'None', 'inline': False})
-        actions.append({'type': 'edit_message', 'channel_id': ch_id, 'message_id': msg_id, 'embed': embed})
-        actions.append({'type': 'clear_reactions', 'channel_id': ch_id, 'message_id': msg_id})
+    # Roles + channels from form
+    if application.responses:
+        role_ids, channel_ids = _extract_form_selections(gs, application)
+        for rid in role_ids:
+            if rid not in rule_role_ids:
+                actions.append({'type': 'add_role', 'guild_id': gs.guild_id, 'user_id': user_id, 'role_id': rid})
+                db_r = DiscordRole.objects.filter(guild=gs, discord_id=rid).first()
+                assigned_names.append(db_r.name if db_r else str(rid))
+        for cid in channel_ids:
+            actions.append({'type': 'set_permissions', 'channel_id': cid, 'user_id': user_id,
+                           'allow': ['read_messages', 'send_messages']})
 
-    # DM the user
-    template = get_template(gs, 'APPLICATION_APPROVED')
-    actions.append({
-        'type': 'send_dm',
-        'user_id': application.user_id,
-        'content': template.format(server=gs.guild_name, roles=', '.join(role_names) or 'None'),
-    })
+    # Extra roles from @mentions in approve command
+    for rid in (extra_role_ids or []):
+        if not any(a.get('role_id') == rid for a in actions if a['type'] == 'add_role'):
+            actions.append({'type': 'add_role', 'guild_id': gs.guild_id, 'user_id': user_id, 'role_id': rid})
+            db_r = DiscordRole.objects.filter(guild=gs, discord_id=rid).first()
+            assigned_names.append(db_r.name if db_r else str(rid))
 
-    # Delete the approved application
+    roles_str = ', '.join(assigned_names) or 'no specific roles'
+
+    # Edit tracked embed in-place
+    msg_id = event.get('message_id') or application.message_id
+    if msg_id and gs.bounce_channel_id:
+        original = event.get('original_embed', {})
+        original['color'] = 0x2ecc71  # green
+        if 'fields' not in original:
+            original['fields'] = []
+        original['fields'] = [f for f in original['fields'] if f.get('name') != 'Actions']
+        original['fields'].append({'name': 'Status', 'value': f'\u2705 Approved by {admin["name"]}', 'inline': False})
+        original['fields'].append({'name': 'Roles', 'value': roles_str, 'inline': False})
+        actions.append({'type': 'edit_message', 'channel_id': gs.bounce_channel_id,
+                       'message_id': msg_id, 'embed': original})
+        actions.append({'type': 'clear_reactions', 'channel_id': gs.bounce_channel_id, 'message_id': msg_id})
+
+    # DM user
+    tpl = get_template(gs, 'APPROVE_DM')
+    actions.append({'type': 'send_dm', 'user_id': user_id,
+                   'content': tpl.format(server=gs.guild_name, roles=roles_str)})
+
+    # Cleanup old bot messages in bounce
+    if gs.bounce_channel_id:
+        actions.append({'type': 'cleanup_channel', 'channel_id': gs.bounce_channel_id,
+                       'count': 10, 'guild_id': gs.guild_id})
+
+    # Delete approved application
     application.delete()
-
     return actions
 
 
-def _reject_via_reaction(gs, application, admin, event):
-    """Reject application from reaction."""
+def _reject_user(gs, application, admin, event, reason='No reason provided'):
+    """Core rejection logic - used by both commands and reactions."""
     actions = []
-    guild_id = gs.guild_id
+    user_id = application.user_id
 
-    # Update application
     application.status = 'REJECTED'
     application.reviewed_by = admin['id']
     application.reviewed_by_name = admin['name']
@@ -366,103 +511,39 @@ def _reject_via_reaction(gs, application, admin, event):
 
     # Remove Pending role
     if gs.pending_role_id:
-        actions.append({
-            'type': 'remove_role',
-            'guild_id': guild_id,
-            'user_id': application.user_id,
-            'role_id': gs.pending_role_id,
-        })
+        actions.append({'type': 'remove_role', 'guild_id': gs.guild_id,
+                        'user_id': user_id, 'role_id': gs.pending_role_id})
 
-    # Update embed
-    msg_id = event.get('message_id')
-    ch_id = event.get('channel_id')
-    if msg_id and ch_id:
-        embed = event.get('original_embed', {})
-        embed['color'] = 0xe74c3c  # red
-        if 'fields' not in embed:
-            embed['fields'] = []
-        embed['fields'].append({'name': 'Status', 'value': f'❌ Rejected by <@{admin["id"]}>', 'inline': False})
-        actions.append({'type': 'edit_message', 'channel_id': ch_id, 'message_id': msg_id, 'embed': embed})
-        actions.append({'type': 'clear_reactions', 'channel_id': ch_id, 'message_id': msg_id})
+    # Edit tracked embed in-place
+    msg_id = event.get('message_id') or application.message_id
+    if msg_id and gs.bounce_channel_id:
+        original = event.get('original_embed', {})
+        original['color'] = 0xe74c3c  # red
+        if 'fields' not in original:
+            original['fields'] = []
+        original['fields'] = [f for f in original['fields'] if f.get('name') != 'Actions']
+        original['fields'].append({'name': 'Status', 'value': f'\u274c Rejected by {admin["name"]}', 'inline': False})
+        if reason and reason != 'No reason provided':
+            original['fields'].append({'name': 'Reason', 'value': reason, 'inline': False})
+        actions.append({'type': 'edit_message', 'channel_id': gs.bounce_channel_id,
+                       'message_id': msg_id, 'embed': original})
+        actions.append({'type': 'clear_reactions', 'channel_id': gs.bounce_channel_id, 'message_id': msg_id})
 
-    # DM the user
-    template = get_template(gs, 'APPLICATION_REJECTED')
-    actions.append({
-        'type': 'send_dm',
-        'user_id': application.user_id,
-        'content': template.format(
-            server=gs.guild_name,
-            reason='Your application did not meet our requirements at this time.',
-        ),
-    })
+    # DM user
+    tpl = get_template(gs, 'REJECT_DM')
+    actions.append({'type': 'send_dm', 'user_id': user_id,
+                   'content': tpl.format(server=gs.guild_name, reason=reason)})
+
+    # Notify pending channel
+    if gs.pending_channel_id:
+        tpl = get_template(gs, 'REJECT_PENDING')
+        actions.append({'type': 'send_message', 'channel_id': gs.pending_channel_id,
+                       'content': tpl.format(user=f'<@{user_id}>', reason=reason)})
 
     return actions
 
 
-# ── Command handlers ─────────────────────────────────────────────────────────
-
-def handle_command(event):
-    """Route a command event to the appropriate handler."""
-    guild_id = event.get('guild_id')
-    command_name = event['command']
-    args = event.get('args', [])
-    author = event['author']
-
-    # getaccess: DM-only, no guild needed
-    if command_name == 'getaccess':
-        if guild_id:
-            tpl = get_template(None, 'DM_ONLY_WARNING')
-            return [{'type': 'reply', 'content': tpl}]
-        return _cmd_getaccess(event)
-
-    # All other commands need a guild
-    if not guild_id:
-        tpl = get_template(None, 'SERVER_ONLY_WARNING')
-        return [{'type': 'reply', 'content': tpl}]
-
-    gs = _get_guild(guild_id)
-    if not gs:
-        return [{'type': 'reply', 'content': '❌ This server is not configured.'}]
-
-    # Look up command in DB
-    try:
-        bot_cmd = BotCommand.objects.get(guild=gs, name=command_name)
-    except BotCommand.DoesNotExist:
-        available = list(BotCommand.objects.filter(guild=gs, enabled=True).values_list('name', flat=True))
-        tpl = get_template(gs, 'COMMAND_NOT_FOUND')
-        return [{'type': 'reply', 'content': tpl.format(command=command_name, commands=', '.join(sorted(available)) or 'none')}]
-
-    if not bot_cmd.enabled:
-        tpl = get_template(gs, 'COMMAND_DISABLED')
-        return [{'type': 'reply', 'content': tpl.format(command=command_name)}]
-
-    # Get first action type to determine handler
-    action = CommandAction.objects.filter(command=bot_cmd, enabled=True).order_by('order').first()
-    if not action:
-        return [{'type': 'reply', 'content': f'⚠️ Command `{command_name}` has no actions configured.'}]
-
-    handler_map = {
-        'ADD_INVITE_RULE': _cmd_addrule,
-        'DELETE_INVITE_RULE': _cmd_delrule,
-        'LIST_INVITE_RULES': _cmd_listrules,
-        'SET_SERVER_MODE': _cmd_setmode,
-        'LIST_COMMANDS': _cmd_listcommands,
-        'LIST_FORM_FIELDS': _cmd_listfields,
-        'RELOAD_CONFIG': _cmd_reload,
-        'APPROVE_APPLICATION': _cmd_approve,
-        'REJECT_APPLICATION': _cmd_reject,
-    }
-
-    handler = handler_map.get(action.type)
-    if not handler:
-        return [{'type': 'reply', 'content': f'⚠️ Unknown action type: {action.type}'}]
-
-    try:
-        return handler(gs, event)
-    except _CmdError as e:
-        tpl = get_template(gs, 'COMMAND_ERROR')
-        return [{'type': 'reply', 'content': tpl.format(message=str(e))}]
-
+# ── Command routing ──────────────────────────────────────────────────────────
 
 class _CmdError(Exception):
     pass
@@ -473,7 +554,93 @@ def _require_admin(gs, author_role_ids):
         raise _CmdError("You need the **BotAdmin** role to use this command.")
 
 
-# ── Individual commands ──────────────────────────────────────────────────────
+BUILTIN_COMMANDS = {}  # populated after function definitions
+
+
+def handle_command(event):
+    """Route a command to built-in handler or custom automation."""
+    command_name = event['command']
+    guild_id = event.get('guild_id')
+
+    # getaccess is DM-only
+    if command_name == 'getaccess':
+        if guild_id:
+            tpl = get_template(None, 'DM_ONLY_WARNING')
+            return [{'type': 'reply', 'content': tpl}]
+        return _cmd_getaccess(event)
+
+    # Everything else needs a guild
+    if not guild_id:
+        tpl = get_template(None, 'SERVER_ONLY_WARNING')
+        return [{'type': 'reply', 'content': tpl}]
+
+    gs = _get_guild(guild_id)
+    if not gs:
+        return [{'type': 'reply', 'content': '\u274c This server is not configured.'}]
+
+    # Built-in commands
+    handler = BUILTIN_COMMANDS.get(command_name)
+    if handler:
+        try:
+            return handler(gs, event)
+        except _CmdError as e:
+            tpl = get_template(gs, 'COMMAND_ERROR')
+            return [{'type': 'reply', 'content': tpl.format(message=str(e))}]
+
+    # Custom automations with trigger=COMMAND
+    autos = Automation.objects.filter(
+        guild=gs, trigger='COMMAND', enabled=True,
+    ).prefetch_related('actions')
+
+    for auto in autos:
+        cfg_name = (auto.trigger_config or {}).get('name', '')
+        if cfg_name == command_name:
+            if auto.admin_only:
+                try:
+                    _require_admin(gs, event['author']['role_ids'])
+                except _CmdError as e:
+                    tpl = get_template(gs, 'COMMAND_ERROR')
+                    return [{'type': 'reply', 'content': tpl.format(message=str(e))}]
+            results = []
+            for action in auto.actions.filter(enabled=True).order_by('order'):
+                results.extend(_process_action(action, gs, event))
+            return results
+
+    # Nothing matched
+    builtin_names = sorted(BUILTIN_COMMANDS.keys())
+    custom_names = sorted(
+        (a.trigger_config or {}).get('name', '?')
+        for a in Automation.objects.filter(guild=gs, trigger='COMMAND', enabled=True)
+    )
+    all_cmds = ', '.join(builtin_names + custom_names) or 'none'
+    tpl = get_template(gs, 'COMMAND_NOT_FOUND')
+    return [{'type': 'reply', 'content': tpl.format(command=command_name, commands=all_cmds)}]
+
+
+# ── Built-in command implementations ────────────────────────────────────────
+
+def _cmd_help(gs, event):
+    builtin_info = [
+        ('help', 'Show this command list'),
+        ('addrule', 'Add an invite rule (Admin)'),
+        ('delrule', 'Delete an invite rule (Admin)'),
+        ('listrules', 'List all invite rules'),
+        ('setmode', 'Set AUTO / APPROVAL mode (Admin)'),
+        ('approve', 'Approve a pending user (Admin)'),
+        ('reject', 'Reject a pending user (Admin)'),
+        ('listfields', 'List form fields'),
+        ('reload', 'Reload configuration (Admin)'),
+        ('getaccess', 'Get web panel link (DM only)'),
+    ]
+    lines = [f'\u2022 **{name}** \u2014 {desc}' for name, desc in builtin_info]
+
+    customs = Automation.objects.filter(guild=gs, trigger='COMMAND', enabled=True)
+    for a in customs:
+        cmd_name = (a.trigger_config or {}).get('name', '?')
+        lines.append(f'\u2022 **{cmd_name}** \u2014 {a.description or "Custom command"}')
+
+    return [{'type': 'reply', 'content': '\U0001f916 **Available Commands:**\n' + '\n'.join(lines)}]
+
 
 def _cmd_addrule(gs, event):
     args = event['args']
@@ -482,30 +649,27 @@ def _cmd_addrule(gs, event):
         raise _CmdError("Usage: `@Bot addrule <invite_code> <role1,role2,...> [description]`")
 
     invite_code = args[0]
-    role_names_input = args[1].split(',')
+    role_names = args[1].split(',')
     description = ' '.join(args[2:]) if len(args) > 2 else ''
 
-    # Match roles from guild_roles in event
     guild_roles = {r['name'].lower(): r for r in event.get('guild_roles', [])}
     roles_to_add = []
-    for name in role_names_input:
+    for name in role_names:
         name = name.strip()
         r = guild_roles.get(name.lower())
         if not r:
             raise _CmdError(f"Role not found: `{name}`")
         db_role, _ = DiscordRole.objects.get_or_create(
-            discord_id=r['id'], guild=gs, defaults={'name': r['name']}
-        )
+            discord_id=r['id'], guild=gs, defaults={'name': r['name']})
         roles_to_add.append(db_role)
 
     rule, _ = InviteRule.objects.get_or_create(
-        guild=gs, invite_code=invite_code, defaults={'description': description}
-    )
+        guild=gs, invite_code=invite_code, defaults={'description': description})
     rule.roles.set(roles_to_add)
 
     role_str = ', '.join(r.name for r in roles_to_add)
     tpl = get_template(gs, 'COMMAND_SUCCESS')
-    return [{'type': 'reply', 'content': tpl.format(message=f'Invite rule created: `{invite_code}` → {role_str}')}]
+    return [{'type': 'reply', 'content': tpl.format(message=f'Invite rule created: `{invite_code}` \u2192 {role_str}')}]
 
 
 def _cmd_delrule(gs, event):
@@ -513,7 +677,6 @@ def _cmd_delrule(gs, event):
     _require_admin(gs, event['author']['role_ids'])
     if len(args) < 1:
         raise _CmdError("Usage: `@Bot delrule <invite_code>`")
-
     try:
         rule = InviteRule.objects.get(guild=gs, invite_code=args[0])
         rule.delete()
@@ -526,16 +689,14 @@ def _cmd_delrule(gs, event):
 def _cmd_listrules(gs, event):
     rules = InviteRule.objects.filter(guild=gs).prefetch_related('roles')
     if not rules.exists():
-        return [{'type': 'reply', 'content': '📋 No rules configured yet.'}]
-
-    embed = {'title': '📋 Invite Rules', 'color': 0x3498db, 'fields': []}
+        return [{'type': 'reply', 'content': '\U0001f4cb No rules configured yet.'}]
+    embed = {'title': '\U0001f4cb Invite Rules', 'color': 0x3498db, 'fields': []}
     for rule in rules:
         role_names = ', '.join(r.name for r in rule.roles.all())
-        value = f"**Roles:** {role_names or 'None'}"
+        val = f"**Roles:** {role_names or 'None'}"
         if rule.description:
-            value += f"\n*{rule.description}*"
-        embed['fields'].append({'name': f'`{rule.invite_code}`', 'value': value, 'inline': False})
-
+            val += f"\n*{rule.description}*"
+        embed['fields'].append({'name': f'`{rule.invite_code}`', 'value': val, 'inline': False})
     return [{'type': 'send_embed', 'channel_id': event['channel_id'], 'embed': embed}]
 
 
@@ -544,110 +705,72 @@ def _cmd_setmode(gs, event):
     _require_admin(gs, event['author']['role_ids'])
     if len(args) < 1:
         raise _CmdError("Usage: `@Bot setmode <AUTO|APPROVAL>`")
-
     mode = args[0].upper()
     if mode not in ('AUTO', 'APPROVAL'):
         raise _CmdError("Mode must be AUTO or APPROVAL")
-
-    old_mode = gs.mode
+    old = gs.mode
     gs.mode = mode
     gs.save()
-
     actions = []
-    # If switching to APPROVAL, bot needs to ensure channels exist
     if mode == 'APPROVAL':
         actions.append({'type': 'ensure_resources', 'guild_id': gs.guild_id})
-
     tpl = get_template(gs, 'COMMAND_SUCCESS')
-    actions.append({'type': 'reply', 'content': tpl.format(message=f'Server mode changed from **{old_mode}** to **{mode}**')})
+    actions.append({'type': 'reply', 'content': tpl.format(
+        message=f'Server mode changed from **{old}** to **{mode}**')})
     return actions
-
-
-def _cmd_listcommands(gs, event):
-    commands = BotCommand.objects.filter(guild=gs, enabled=True).order_by('name')
-    if not commands.exists():
-        return [{'type': 'reply', 'content': '📋 No commands configured.'}]
-
-    cmd_list = '\n'.join(f'• **{c.name}** - {c.description}' for c in commands)
-    return [{'type': 'reply', 'content': f'📋 **Available Commands:**\n{cmd_list}'}]
 
 
 def _cmd_listfields(gs, event):
     fields = FormField.objects.select_related('dropdown').filter(guild=gs).order_by('order')
     if not fields.exists():
-        return [{'type': 'reply', 'content': '📋 No form fields configured yet. Add them in the admin panel.'}]
-
-    embed = {'title': '📋 Application Form Fields', 'color': 0x3498db, 'fields': []}
-    for field in fields:
-        required_str = "✅ Required" if field.required else "⭕ Optional"
-        type_display = field.get_field_type_display()
-        details = f"Type: `{type_display}` • {required_str}"
-        if field.field_type == 'dropdown' and field.dropdown:
-            source = field.dropdown.get_source_type_display()
-            multi = " (multiple)" if field.dropdown.multiselect else ""
-            options = field.dropdown.get_options()
-            option_names = [o['label'] for o in options[:5]]
-            preview = ', '.join(option_names)
-            if len(options) > 5:
-                preview += f" (+{len(options) - 5} more)"
-            details += f"\nDropdown: **{field.dropdown.name}** [{source}]{multi}"
+        return [{'type': 'reply', 'content': '\U0001f4cb No form fields configured yet. Add them in the admin panel.'}]
+    embed = {'title': '\U0001f4cb Application Form Fields', 'color': 0x3498db, 'fields': []}
+    for f in fields:
+        req = "\u2705 Required" if f.required else "\u2b55 Optional"
+        details = f"Type: `{f.get_field_type_display()}` \u2022 {req}"
+        if f.field_type == 'dropdown' and f.dropdown:
+            src = f.dropdown.get_source_type_display()
+            multi = " (multiple)" if f.dropdown.multiselect else ""
+            opts = f.dropdown.get_options()[:5]
+            preview = ', '.join(o['label'] for o in opts)
+            if len(f.dropdown.get_options()) > 5:
+                preview += f" (+{len(f.dropdown.get_options()) - 5} more)"
+            details += f"\nDropdown: **{f.dropdown.name}** [{src}]{multi}"
             if preview:
                 details += f"\nOptions: {preview}"
-        if field.placeholder:
-            details += f"\nPlaceholder: *{field.placeholder}*"
-        embed['fields'].append({'name': field.label, 'value': details, 'inline': False})
-
+        if f.placeholder:
+            details += f"\nPlaceholder: *{f.placeholder}*"
+        embed['fields'].append({'name': f.label, 'value': details, 'inline': False})
     return [{'type': 'send_embed', 'channel_id': event['channel_id'], 'embed': embed}]
 
 
 def _cmd_reload(gs, event):
     _require_admin(gs, event['author']['role_ids'])
-
     actions = []
+    for r in event.get('guild_roles', []):
+        DiscordRole.objects.update_or_create(discord_id=r['id'], guild=gs, defaults={'name': r['name']})
+    for c in event.get('guild_channels', []):
+        DiscordChannel.objects.update_or_create(discord_id=c['id'], guild=gs, defaults={'name': c['name']})
 
-    # Sync roles from event data
-    guild_roles = event.get('guild_roles', [])
-    for r in guild_roles:
-        DiscordRole.objects.update_or_create(
-            discord_id=r['id'], guild=gs, defaults={'name': r['name']}
-        )
-
-    # Sync channels from event data
-    guild_channels = event.get('guild_channels', [])
-    for c in guild_channels:
-        DiscordChannel.objects.update_or_create(
-            discord_id=c['id'], guild=gs, defaults={'name': c['name']}
-        )
-
-    # Create missing applications for APPROVAL mode
     missing_apps = 0
     if gs.mode == 'APPROVAL':
-        existing_user_ids = set(Application.objects.filter(guild=gs).values_list('user_id', flat=True))
-        guild_members = event.get('guild_members', [])
-        for m in guild_members:
-            if m.get('bot', False):
+        existing = set(Application.objects.filter(guild=gs).values_list('user_id', flat=True))
+        for m in event.get('guild_members', []):
+            if m.get('bot') or m['id'] in existing:
                 continue
-            if m['id'] not in existing_user_ids:
-                Application.objects.create(
-                    guild=gs,
-                    user_id=m['id'],
-                    user_name=m['name'],
-                    invite_code='reload',
-                    inviter_name='System (reload)',
-                    status='PENDING',
-                    responses={},
-                )
-                missing_apps += 1
+            Application.objects.create(
+                guild=gs, user_id=m['id'], user_name=m['name'],
+                invite_code='reload', inviter_name='System (reload)',
+                status='PENDING', responses={})
+            missing_apps += 1
 
-    # Ensure resources exist (bot-side)
     actions.append({'type': 'ensure_resources', 'guild_id': gs.guild_id})
-
-    details = f"{len(guild_roles)} roles, {len(guild_channels)} channels"
+    details = f"{len(event.get('guild_roles', []))} roles, {len(event.get('guild_channels', []))} channels"
     if gs.mode == 'APPROVAL':
         details += f", {missing_apps} missing applications created"
-
     tpl = get_template(gs, 'COMMAND_SUCCESS')
-    actions.append({'type': 'reply', 'content': tpl.format(message=f'Reloaded configuration ({details}). All resources verified.')})
+    actions.append({'type': 'reply', 'content': tpl.format(
+        message=f'Reloaded configuration ({details}). All resources verified.')})
     return actions
 
 
@@ -659,7 +782,6 @@ def _cmd_approve(gs, event):
 
     user_mentions = event.get('user_mentions', [])
     role_mentions = event.get('role_mentions', [])
-    admin_role_id = gs.bot_admin_role_id
 
     # Bulk approve: role mentioned with no users
     if not user_mentions and role_mentions:
@@ -669,68 +791,19 @@ def _cmd_approve(gs, event):
         raise _CmdError("Please mention the user to approve: `@Bot approve @user`")
 
     target = user_mentions[0]
-    actions = []
-
-    # Find pending application
     application = Application.objects.filter(
         guild=gs, user_id=target['id'], status='PENDING'
     ).order_by('-created_at').first()
+    if not application:
+        raise _CmdError(f"No pending application for {target['name']}")
 
-    # Collect roles: from @mentions + form selections
-    role_ids_to_assign = [r['id'] for r in role_mentions if r['id'] != admin_role_id]
-    channels_to_allow = []
+    extra_role_ids = [r['id'] for r in role_mentions if r['id'] != gs.bot_admin_role_id]
 
-    if application and application.responses:
-        form_role_ids, form_channel_ids = _extract_form_selections(gs, application)
-        for rid in form_role_ids:
-            if rid not in role_ids_to_assign:
-                role_ids_to_assign.append(rid)
-        channels_to_allow = form_channel_ids
-
-    # Remove Pending role
-    if gs.pending_role_id:
-        actions.append({
-            'type': 'remove_role',
-            'guild_id': gs.guild_id,
-            'user_id': target['id'],
-            'role_id': gs.pending_role_id,
-        })
-
-    # Assign roles
-    assigned_role_names = []
-    for rid in role_ids_to_assign:
-        actions.append({
-            'type': 'add_role',
-            'guild_id': gs.guild_id,
-            'user_id': target['id'],
-            'role_id': rid,
-        })
-        db_role = DiscordRole.objects.filter(guild=gs, discord_id=rid).first()
-        assigned_role_names.append(db_role.name if db_role else str(rid))
-
-    # Grant channel access
-    for cid in channels_to_allow:
-        actions.append({
-            'type': 'set_permissions',
-            'channel_id': cid,
-            'user_id': target['id'],
-            'allow': ['read_messages', 'send_messages'],
-        })
-
-    # Delete the approved application
-    if application:
-        application.delete()
-
-    # DM the user
-    roles_str = ', '.join(assigned_role_names) or 'no specific roles'
-    tpl = get_template(gs, 'APPROVE_DM')
-    actions.append({'type': 'send_dm', 'user_id': target['id'], 'content': tpl.format(server=gs.guild_name, roles=roles_str)})
-
-    # Confirmation in channel
+    result = _approve_user(gs, application, event['author'], event, extra_role_ids=extra_role_ids)
     tpl = get_template(gs, 'APPROVE_CONFIRM')
-    actions.append({'type': 'reply', 'content': tpl.format(user=target['name'], roles=roles_str)})
-
-    return actions
+    result.append({'type': 'reply', 'content': tpl.format(
+        user=target['name'], roles=', '.join(str(r) for r in extra_role_ids) or 'from rules/form')})
+    return result
 
 
 def _cmd_bulk_approve(gs, event, target_role):
@@ -741,43 +814,16 @@ def _cmd_bulk_approve(gs, event, target_role):
 
     for m in members:
         app = Application.objects.filter(
-            guild=gs, user_id=m['id']
-        ).order_by('-created_at').first()
-
+            guild=gs, user_id=m['id']).order_by('-created_at').first()
         if not app or not app.responses:
             summary['skipped'] += 1
             continue
-
-        # Extract form selections
-        role_ids, channel_ids = _extract_form_selections(gs, app)
-
-        # Remove Pending role
-        if gs.pending_role_id:
-            actions.append({'type': 'remove_role', 'guild_id': gs.guild_id, 'user_id': m['id'], 'role_id': gs.pending_role_id})
-
-        # Assign roles
-        role_names = []
-        for rid in role_ids:
-            actions.append({'type': 'add_role', 'guild_id': gs.guild_id, 'user_id': m['id'], 'role_id': rid})
-            db_role = DiscordRole.objects.filter(guild=gs, discord_id=rid).first()
-            role_names.append(db_role.name if db_role else str(rid))
-
-        # Channel permissions
-        for cid in channel_ids:
-            actions.append({'type': 'set_permissions', 'channel_id': cid, 'user_id': m['id'], 'allow': ['read_messages', 'send_messages']})
-
-        # DM
-        roles_str = ', '.join(role_names) or 'no specific roles'
-        tpl = get_template(gs, 'APPROVE_DM')
-        actions.append({'type': 'send_dm', 'user_id': m['id'], 'content': tpl.format(server=gs.guild_name, roles=roles_str)})
-
-        # Delete approved application
-        app.delete()
+        actions.extend(_approve_user(gs, app, event['author'], event))
         summary['approved'] += 1
 
-    report = f"✅ **Bulk approve complete — {summary['approved']} approved**"
+    report = f"\u2705 **Bulk approve complete \u2014 {summary['approved']} approved**"
     if summary['skipped']:
-        report += f"\n⏭️ Skipped (form not filled): {summary['skipped']}"
+        report += f"\n\u23ed\ufe0f Skipped (form not filled): {summary['skipped']}"
     actions.append({'type': 'reply', 'content': report})
     return actions
 
@@ -794,46 +840,17 @@ def _cmd_reject(gs, event):
 
     target = user_mentions[0]
     reason = ' '.join(args[1:]) if len(args) > 1 else 'No reason provided'
-    actions = []
 
-    # Update application
     application = Application.objects.filter(
         guild=gs, user_id=target['id'], status='PENDING'
     ).order_by('-created_at').first()
+    if not application:
+        raise _CmdError(f"No pending application for {target['name']}")
 
-    if application:
-        application.status = 'REJECTED'
-        application.reviewed_by = event['author']['id']
-        application.reviewed_by_name = event['author']['name']
-        application.reviewed_at = timezone.now()
-        application.save()
-
-    # Post to #pending
-    if gs.pending_channel_id:
-        tpl = get_template(gs, 'REJECT_PENDING')
-        actions.append({
-            'type': 'send_message',
-            'channel_id': gs.pending_channel_id,
-            'content': tpl.format(user=f"<@{target['id']}>", reason=reason),
-        })
-
-    # Remove Pending role
-    if gs.pending_role_id:
-        actions.append({
-            'type': 'remove_role',
-            'guild_id': gs.guild_id,
-            'user_id': target['id'],
-            'role_id': gs.pending_role_id,
-        })
-
-    # DM user
-    tpl = get_template(gs, 'REJECT_DM')
-    actions.append({'type': 'send_dm', 'user_id': target['id'], 'content': tpl.format(server=gs.guild_name, reason=reason)})
-
-    # Confirmation
+    result = _reject_user(gs, application, event['author'], event, reason=reason)
     tpl = get_template(gs, 'REJECT_CONFIRM')
-    actions.append({'type': 'reply', 'content': tpl.format(user=target['name'], reason=reason)})
-    return actions
+    result.append({'type': 'reply', 'content': tpl.format(user=target['name'], reason=reason)})
+    return result
 
 
 def _cmd_getaccess(event):
@@ -845,36 +862,43 @@ def _cmd_getaccess(event):
         tpl = get_template(None, 'GETACCESS_NO_ADMIN')
         return [{'type': 'send_dm', 'user_id': author['id'], 'content': tpl}]
 
-    # If multiple guilds, the bot handles the selection flow and sends the chosen guild_id
     selected = admin_guilds[0]
     gs = _get_guild(selected['guild_id'])
     if not gs:
-        return [{'type': 'send_dm', 'user_id': author['id'], 'content': '❌ Server not found.'}]
+        return [{'type': 'send_dm', 'user_id': author['id'], 'content': '\u274c Server not found.'}]
 
     app_url = os.environ.get('APP_URL', 'https://your-domain.com').rstrip('/')
     if not app_url.startswith(('http://', 'https://')):
         app_url = f'https://{app_url}'
 
-    # Check existing token
     existing = AccessToken.objects.filter(
-        user_id=author['id'], guild=gs, expires_at__gt=timezone.now()
-    ).first()
-
+        user_id=author['id'], guild=gs, expires_at__gt=timezone.now()).first()
     if existing:
-        expires_str = existing.expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')
         url = f"{app_url}/auth/login/?token={existing.token}"
         tpl = get_template(gs, 'GETACCESS_EXISTS')
-        return [{'type': 'send_dm', 'user_id': author['id'], 'content': tpl.format(server=gs.guild_name, url=url, expires=expires_str)}]
+        return [{'type': 'send_dm', 'user_id': author['id'], 'content': tpl.format(
+            server=gs.guild_name, url=url, expires=existing.expires_at.strftime('%Y-%m-%d %H:%M:%S UTC'))}]
 
-    # Create new token
     token = secrets.token_urlsafe(32)
     expires_at = timezone.now() + timedelta(hours=24)
     AccessToken.objects.create(
         token=token, user_id=author['id'], user_name=author['name'],
-        guild=gs, expires_at=expires_at,
-    )
-
-    expires_str = expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')
+        guild=gs, expires_at=expires_at)
     url = f"{app_url}/auth/login/?token={token}"
     tpl = get_template(gs, 'GETACCESS_RESPONSE')
-    return [{'type': 'send_dm', 'user_id': author['id'], 'content': tpl.format(server=gs.guild_name, url=url, expires=expires_str)}]
+    return [{'type': 'send_dm', 'user_id': author['id'], 'content': tpl.format(
+        server=gs.guild_name, url=url, expires=expires_at.strftime('%Y-%m-%d %H:%M:%S UTC'))}]
+
+
+# Register built-in commands
+BUILTIN_COMMANDS.update({
+    'help': _cmd_help,
+    'addrule': _cmd_addrule,
+    'delrule': _cmd_delrule,
+    'listrules': _cmd_listrules,
+    'setmode': _cmd_setmode,
+    'listfields': _cmd_listfields,
+    'reload': _cmd_reload,
+    'approve': _cmd_approve,
+    'reject': _cmd_reject,
+})

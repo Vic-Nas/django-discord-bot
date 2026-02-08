@@ -159,6 +159,57 @@ async def _execute_one(action, context=None):
             except:
                 pass
 
+    elif t == 'send_embed_tracked':
+        channel = bot.get_channel(action['channel_id'])
+        if channel:
+            embed = _dict_to_embed(action['embed'])
+            msg = await channel.send(embed=embed)
+            # Save message_id to Application for in-place editing later
+            app_id = action.get('application_id')
+            if app_id and msg:
+                from core.models import Application
+                await db_call(
+                    Application.objects.filter(id=app_id).update,
+                    message_id=msg.id,
+                )
+            # Add reaction buttons
+            try:
+                await msg.add_reaction('\u2705')
+                await msg.add_reaction('\u274c')
+            except:
+                pass
+
+    elif t == 'cleanup_channel':
+        channel = bot.get_channel(action['channel_id'])
+        if channel:
+            from core.models import Application
+            # Get message IDs of pending applications (protected)
+            protected = set(await db_call(
+                lambda: list(Application.objects.filter(
+                    guild__guild_id=action['guild_id'],
+                    status='PENDING',
+                    message_id__isnull=False,
+                ).values_list('message_id', flat=True))
+            ))
+            count = action.get('count', 10)
+            deleted = 0
+            async for msg in channel.history(limit=50):
+                if msg.author.id != bot.user.id:
+                    continue
+                if msg.id in protected:
+                    continue
+                # Don't delete messages with pending embeds
+                if msg.embeds and msg.embeds[0].title and 'Application #' in msg.embeds[0].title:
+                    if msg.embeds[0].color and msg.embeds[0].color.value == 0xFFA500:
+                        continue  # orange = still pending
+                try:
+                    await msg.delete()
+                    deleted += 1
+                    if deleted >= count:
+                        break
+                except:
+                    pass
+
     elif t == 'ensure_resources':
         from core.models import GuildSettings
         gs = await db_call(GuildSettings.objects.get, guild_id=action['guild_id'])

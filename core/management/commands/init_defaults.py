@@ -1,168 +1,108 @@
+"""
+Management command to initialize default templates and automations.
+
+Templates are seeded for every guild. Automations are created via
+guild_setup.py when the bot first joins, but this command can recreate
+them if needed (e.g., after a DB reset).
+
+Usage:
+  python manage.py init_defaults
+  python manage.py init_defaults --guild_id 123456789
+"""
+
 from django.core.management.base import BaseCommand
-from core.models import MessageTemplate, GuildSettings, BotCommand, CommandAction
-from bot.handlers.templates import DEFAULT_TEMPLATES
+from core.models import GuildSettings, Automation, Action
+from bot.handlers.templates import init_default_templates, DEFAULT_TEMPLATES
 
 
 class Command(BaseCommand):
-    help = 'Initialize default message templates and bot commands for a guild'
-    
+    help = 'Initialize default templates and automations for all guilds'
+
     def add_arguments(self, parser):
-        parser.add_argument(
-            '--guild_id',
-            type=int,
-            help='Guild ID to initialize. If not provided, initializes all guilds.'
-        )
+        parser.add_argument('--guild_id', type=int, help='Only initialize for this guild')
 
     def handle(self, *args, **options):
-        # Initialize message templates
-        self.stdout.write('Initializing message templates...')
-
-        # Clean up old/renamed template types no longer in DEFAULT_TEMPLATES
-        valid_types = set(DEFAULT_TEMPLATES.keys())
-        old_templates = MessageTemplate.objects.exclude(template_type__in=valid_types)
-        for old in old_templates:
-            self.stdout.write(self.style.WARNING(f'  🗑 Removing obsolete template: {old.template_type}'))
-            old.delete()
-
-        for template_type, content in DEFAULT_TEMPLATES.items():
-            template, created = MessageTemplate.objects.get_or_create(
-                template_type=template_type,
-                defaults={'default_content': content}
-            )
-            
-            if created:
-                self.stdout.write(self.style.SUCCESS(f'  ✓ Created template: {template_type}'))
-            else:
-                # Update content if changed
-                if template.default_content != content:
-                    template.default_content = content
-                    template.save()
-                    self.stdout.write(self.style.WARNING(f'  ↻ Updated template: {template_type}'))
-                else:
-                    self.stdout.write(f'  - Template exists: {template_type}')
-        
-        # Initialize bot commands per guild
-        self.stdout.write('\nInitializing bot commands...')
-        
         guild_id = options.get('guild_id')
+
         if guild_id:
             guilds = GuildSettings.objects.filter(guild_id=guild_id)
-            if not guilds.exists():
-                self.stdout.write(self.style.ERROR(f'Guild {guild_id} not found in database'))
-                return
         else:
             guilds = GuildSettings.objects.all()
-        
+
         if not guilds.exists():
-            self.stdout.write(self.style.WARNING('No guilds found. Add bot to Discord server first.'))
+            self.stdout.write(self.style.WARNING('No guilds found.'))
             return
-        
-        commands_data = [
+
+        for gs in guilds:
+            self.stdout.write(f'\n{"="*50}')
+            self.stdout.write(f'Guild: {gs.guild_name} ({gs.guild_id})')
+            self.stdout.write(f'{"="*50}')
+
+            # Initialize templates
+            init_default_templates(gs)
+            self.stdout.write(self.style.SUCCESS(
+                f'  ✅ {len(DEFAULT_TEMPLATES)} templates initialized'))
+
+            # Create default automations if none exist
+            auto_count = Automation.objects.filter(guild=gs).count()
+            if auto_count == 0:
+                self._create_default_automations(gs)
+                auto_count = Automation.objects.filter(guild=gs).count()
+                self.stdout.write(self.style.SUCCESS(
+                    f'  ✅ {auto_count} automations created'))
+            else:
+                self.stdout.write(self.style.SUCCESS(
+                    f'  ✅ {auto_count} automations already exist (skipped)'))
+
+        self.stdout.write(self.style.SUCCESS(
+            f'\n✅ Done — initialized {guilds.count()} guild(s)'))
+
+    def _create_default_automations(self, gs):
+        """Create default event-driven automations (sync version of guild_setup logic)."""
+        defaults = [
             {
-                'name': 'help',
-                'description': 'Show available commands and how to use them',
+                'name': 'Log Join (Auto)',
+                'trigger': 'MEMBER_JOIN',
+                'trigger_config': {'mode': 'AUTO'},
+                'description': 'Log new member join to bounce channel in AUTO mode',
                 'actions': [
-                    {'type': 'LIST_COMMANDS', 'name': 'show_commands', 'parameters': {}},
+                    {'order': 1, 'action_type': 'SEND_EMBED', 'config': {
+                        'channel': 'bounce', 'template': 'JOIN_LOG_AUTO', 'color': 0x2ecc71}},
+                    {'order': 2, 'action_type': 'ADD_ROLE', 'config': {'from_rule': True}},
                 ]
             },
             {
-                'name': 'getaccess',
-                'description': 'Get a temporary access link to the web panel',
+                'name': 'Approval Join',
+                'trigger': 'MEMBER_JOIN',
+                'trigger_config': {'mode': 'APPROVAL'},
+                'description': 'Create pending application for new member',
                 'actions': [
-                    {'type': 'GENERATE_ACCESS_TOKEN', 'name': 'create_token', 'parameters': {}},
-                ]
-            },
-            {
-                'name': 'addrule',
-                'description': 'Add an invite rule (Admin only)',
-                'actions': [
-                    {'type': 'ADD_INVITE_RULE', 'name': 'add_rule', 'parameters': {}},
-                ]
-            },
-            {
-                'name': 'delrule',
-                'description': 'Delete an invite rule (Admin only)',
-                'actions': [
-                    {'type': 'DELETE_INVITE_RULE', 'name': 'delete_rule', 'parameters': {}},
-                ]
-            },
-            {
-                'name': 'listrules',
-                'description': 'List all invite rules for this server',
-                'actions': [
-                    {'type': 'LIST_INVITE_RULES', 'name': 'show_rules', 'parameters': {}},
-                ]
-            },
-            {
-                'name': 'setmode',
-                'description': 'Set server mode: AUTO or APPROVAL (Admin only)',
-                'actions': [
-                    {'type': 'SET_SERVER_MODE', 'name': 'change_mode', 'parameters': {}},
-                ]
-            },
-            {
-                'name': 'approve',
-                'description': 'Approve a pending user application (Admin only)',
-                'actions': [
-                    {'type': 'APPROVE_APPLICATION', 'name': 'approve_user', 'parameters': {}},
-                ]
-            },
-            {
-                'name': 'reject',
-                'description': 'Reject a pending user application (Admin only)',
-                'actions': [
-                    {'type': 'REJECT_APPLICATION', 'name': 'reject_user', 'parameters': {}},
-                ]
-            },
-            {
-                'name': 'listfields',
-                'description': 'List form fields for applications',
-                'actions': [
-                    {'type': 'LIST_FORM_FIELDS', 'name': 'show_fields', 'parameters': {}},
-                ]
-            },
-            {
-                'name': 'reload',
-                'description': 'Reload bot configuration (Admin only)',
-                'actions': [
-                    {'type': 'RELOAD_CONFIG', 'name': 'reload_config', 'parameters': {}},
+                    {'order': 1, 'action_type': 'ADD_ROLE', 'config': {'role': 'pending'}},
+                    {'order': 2, 'action_type': 'SEND_EMBED', 'config': {
+                        'channel': 'bounce', 'template': 'application', 'track': True}},
+                    {'order': 3, 'action_type': 'SEND_DM', 'config': {
+                        'template': 'WELCOME_DM_APPROVAL'}},
                 ]
             },
         ]
-        
-        for guild in guilds:
-            self.stdout.write(f'\n  Guild: {guild.guild_name} ({guild.guild_id})')
-            
-            for cmd_data in commands_data:
-                # Get or create command
-                bot_cmd, created = BotCommand.objects.get_or_create(
-                    guild=guild,
-                    name=cmd_data['name'],
-                    defaults={
-                        'description': cmd_data['description'],
-                        'enabled': True
-                    }
-                )
-                
-                if created:
-                    self.stdout.write(self.style.SUCCESS(f'    ✓ Created command: {cmd_data["name"]}'))
-                else:
-                    self.stdout.write(f'    - Command exists: {cmd_data["name"]}')
-                
-                # Create actions for this command
-                for action_order, action in enumerate(cmd_data.get('actions', []), start=1):
-                    action_obj, action_created = CommandAction.objects.get_or_create(
-                        command=bot_cmd,
-                        name=action['name'],
-                        defaults={
-                            'order': action_order,
-                            'type': action['type'],
-                            'parameters': action['parameters'],
-                            'enabled': True
-                        }
+
+        for d in defaults:
+            auto, created = Automation.objects.get_or_create(
+                guild=gs,
+                name=d['name'],
+                defaults={
+                    'trigger': d['trigger'],
+                    'trigger_config': d.get('trigger_config', {}),
+                    'description': d.get('description', ''),
+                    'enabled': True,
+                }
+            )
+            if created:
+                for a in d.get('actions', []):
+                    Action.objects.create(
+                        automation=auto,
+                        order=a['order'],
+                        action_type=a['action_type'],
+                        config=a.get('config', {}),
+                        enabled=True,
                     )
-                    
-                    if action_created:
-                        self.stdout.write(f'      ✓ Created action: {action["type"]}')
-        
-        self.stdout.write(self.style.SUCCESS('\n✅ Initialization complete!'))

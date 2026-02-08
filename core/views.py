@@ -123,10 +123,10 @@ def _resolve_display_value(field, raw_value):
 
 
 def _post_application_embed(guild_settings, application, fields):
-    """Post the application embed to the #approvals channel via Discord REST API."""
-    channel_id = guild_settings.approvals_channel_id
+    """Post the application embed to the #bounce channel via Discord REST API."""
+    channel_id = guild_settings.bounce_channel_id
     if not channel_id:
-        print('\u274c No approvals_channel_id set — cannot post application embed')
+        print('\u274c No bounce_channel_id set — cannot post application embed')
         return
 
     token = os.environ.get('DISCORD_TOKEN')
@@ -175,7 +175,13 @@ def _post_application_embed(guild_settings, application, fields):
         'User-Agent': 'DiscordBot (https://github.com/Vic-Nas/django-discord-bot, 1.0)',
     })
     try:
-        urllib.request.urlopen(req)
+        resp = urllib.request.urlopen(req)
+        resp_data = json.loads(resp.read().decode())
+        # Save message_id for in-place editing later
+        msg_id = resp_data.get('id')
+        if msg_id:
+            application.message_id = int(msg_id)
+            application.save(update_fields=['message_id'])
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors='replace')
         print(f'\u274c Failed to post application embed to Discord: {e} — {body}')

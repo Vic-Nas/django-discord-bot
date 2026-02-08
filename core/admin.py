@@ -2,7 +2,7 @@ from django.contrib import admin
 from .models import (
     GuildSettings, DiscordRole, DiscordChannel, InviteRule,
     Dropdown, DropdownOption, FormField, Application,
-    BotCommand, CommandAction,
+    Automation, Action,
     MessageTemplate, GuildMessageTemplate, AccessToken
 )
 
@@ -26,7 +26,7 @@ class GuildSettingsAdmin(admin.ModelAdmin):
             'description': 'These are auto-created by the bot. Only edit if you know the Discord role IDs.',
         }),
         ('Channels (auto-managed)', {
-            'fields': ('logs_channel_id', 'approvals_channel_id', 'pending_channel_id'),
+            'fields': ('bounce_channel_id', 'pending_channel_id'),
             'description': 'These are auto-created by the bot. Only edit if you know the Discord channel IDs.',
         }),
         ('Metadata', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
@@ -49,6 +49,32 @@ class DiscordChannelAdmin(admin.ModelAdmin):
     search_fields = ('name',)
 
 
+# ─── Automations ──────────────────────────────────────────────────────────────
+
+class ActionInline(admin.TabularInline):
+    model = Action
+    fields = ('order', 'action_type', 'config', 'enabled')
+    extra = 1
+    ordering = ('order',)
+
+
+@admin.register(Automation)
+class AutomationAdmin(admin.ModelAdmin):
+    list_display = ('name', 'guild', 'trigger', 'admin_only', 'enabled')
+    list_filter = ('guild', 'trigger', 'enabled')
+    search_fields = ('name', 'description')
+    inlines = [ActionInline]
+    fieldsets = (
+        (None, {'fields': ('guild', 'name', 'trigger', 'trigger_config', 'enabled', 'admin_only', 'description')}),
+    )
+
+
+@admin.register(Action)
+class ActionAdmin(admin.ModelAdmin):
+    list_display = ('automation', 'action_type', 'order', 'enabled')
+    list_filter = ('automation__guild', 'action_type', 'enabled')
+
+
 # ─── Invite Rules ─────────────────────────────────────────────────────────────
 
 @admin.register(InviteRule)
@@ -61,7 +87,6 @@ class InviteRuleAdmin(admin.ModelAdmin):
 # ─── Dropdowns ────────────────────────────────────────────────────────────────
 
 class DropdownOptionInline(admin.TabularInline):
-    """Inline editor for custom dropdown options"""
     model = DropdownOption
     fields = ('order', 'label', 'value')
     extra = 2
@@ -75,24 +100,14 @@ class DropdownAdmin(admin.ModelAdmin):
     inlines = [DropdownOptionInline]
     filter_horizontal = ('roles', 'channels')
     fieldsets = (
-        (None, {
-            'fields': ('guild', 'name', 'source_type', 'multiselect'),
-        }),
+        (None, {'fields': ('guild', 'name', 'source_type', 'multiselect')}),
         ('Role Selection', {
             'fields': ('roles',),
-            'description': (
-                'Pick which roles appear in this dropdown. '
-                'These come from Discord (synced by the <b>reload</b> command). '
-                'Leave empty to include ALL guild roles.'
-            ),
+            'description': 'Pick which roles appear in this dropdown. Leave empty = ALL guild roles.',
         }),
         ('Channel Selection', {
             'fields': ('channels',),
-            'description': (
-                'Pick which channels appear in this dropdown. '
-                'These come from Discord (synced by the <b>reload</b> command). '
-                'Leave empty to include ALL guild channels.'
-            ),
+            'description': 'Pick which channels appear in this dropdown. Leave empty = ALL guild channels.',
         }),
     )
 
@@ -108,24 +123,19 @@ class DropdownAdmin(admin.ModelAdmin):
     option_count.short_description = 'Options'
 
     def get_inline_instances(self, request, obj=None):
-        """Only show DropdownOption inline for CUSTOM source type"""
         inlines = super().get_inline_instances(request, obj)
         if obj and obj.source_type != 'CUSTOM':
             return []
         return inlines
 
     def get_fieldsets(self, request, obj=None):
-        """Show only the relevant section based on source_type"""
         base = list(super().get_fieldsets(request, obj))
         if obj:
             if obj.source_type == 'ROLES':
-                # Remove Channel Selection fieldset
                 return [fs for fs in base if fs[0] != 'Channel Selection']
             elif obj.source_type == 'CHANNELS':
-                # Remove Role Selection fieldset
                 return [fs for fs in base if fs[0] != 'Role Selection']
-            else:  # CUSTOM
-                # Remove both Role and Channel fieldsets
+            else:
                 return [fs for fs in base if fs[0] not in ('Role Selection', 'Channel Selection')]
         return base
 
@@ -144,17 +154,13 @@ class FormFieldAdmin(admin.ModelAdmin):
     list_filter = ('guild', 'field_type', 'required')
     list_editable = ('order',)
     fieldsets = (
-        (None, {
-            'fields': ('guild', 'label', 'field_type', 'required', 'order'),
-        }),
+        (None, {'fields': ('guild', 'label', 'field_type', 'required', 'order')}),
         ('For Dropdown fields', {
             'fields': ('dropdown',),
-            'description': 'Select a pre-created Dropdown. Only needed when field type is "Dropdown".',
             'classes': ('collapse',),
         }),
         ('For Text fields', {
             'fields': ('placeholder',),
-            'description': 'Placeholder text shown in the input box.',
             'classes': ('collapse',),
         }),
     )
@@ -167,53 +173,23 @@ class ApplicationAdmin(admin.ModelAdmin):
     list_display = ('user_name', 'guild', 'status', 'invite_code', 'reviewed_by_name', 'created_at')
     list_filter = ('guild', 'status')
     search_fields = ('user_name',)
-    readonly_fields = ('created_at', 'responses', 'status', 'reviewed_by', 'reviewed_by_name', 'reviewed_at')
-    
+    readonly_fields = ('created_at', 'responses', 'status', 'reviewed_by', 'reviewed_by_name', 'reviewed_at', 'message_id')
+
     def get_readonly_fields(self, request, obj=None):
-        """Make status readonly - must use Discord commands to approve/reject"""
-        if obj:  # editing existing
+        if obj:
             return self.readonly_fields
-        return ('created_at', 'responses')  # allow setting initial status on create
-    
+        return ('created_at', 'responses')
+
     fieldsets = (
         ('Application Info', {
             'fields': ('guild', 'user_id', 'user_name', 'invite_code', 'inviter_id', 'inviter_name'),
         }),
         ('Status', {
-            'fields': ('status', 'reviewed_by', 'reviewed_by_name', 'reviewed_at'),
-            'description': '⚠️ To reject applications, use Discord commands: <code>@Bot reject @user</code>. Changing status here only updates the database.',
+            'fields': ('status', 'reviewed_by', 'reviewed_by_name', 'reviewed_at', 'message_id'),
         }),
-        ('Responses', {
-            'fields': ('responses',),
-        }),
-        ('Timestamps', {
-            'fields': ('created_at',),
-        }),
+        ('Responses', {'fields': ('responses',)}),
+        ('Timestamps', {'fields': ('created_at',)}),
     )
-
-
-# ─── Bot Commands & Actions ───────────────────────────────────────────────────
-
-class CommandActionInline(admin.TabularInline):
-    """Inline editor for actions within a command"""
-    model = CommandAction
-    fields = ('order', 'name', 'type', 'enabled', 'parameters')
-    extra = 1
-    ordering = ('order',)
-
-
-@admin.register(BotCommand)
-class BotCommandAdmin(admin.ModelAdmin):
-    list_display = ('name', 'guild', 'description', 'enabled')
-    list_filter = ('guild', 'enabled')
-    search_fields = ('name', 'description')
-    inlines = [CommandActionInline]
-
-
-@admin.register(CommandAction)
-class CommandActionAdmin(admin.ModelAdmin):
-    list_display = ('name', 'command', 'type', 'order', 'enabled')
-    list_filter = ('command__guild', 'type', 'enabled')
 
 
 # ─── Message Templates ────────────────────────────────────────────────────────
@@ -221,7 +197,7 @@ class CommandActionAdmin(admin.ModelAdmin):
 @admin.register(MessageTemplate)
 class MessageTemplateAdmin(admin.ModelAdmin):
     list_display = ('template_type', 'default_content_preview')
-    
+
     def default_content_preview(self, obj):
         return obj.default_content[:80] + '...' if len(obj.default_content) > 80 else obj.default_content
     default_content_preview.short_description = 'Content Preview'
@@ -231,12 +207,10 @@ class MessageTemplateAdmin(admin.ModelAdmin):
 class GuildMessageTemplateAdmin(admin.ModelAdmin):
     list_display = ('guild', 'template_type', 'custom_content_preview')
     list_filter = ('guild', 'template__template_type')
-    search_fields = ('template__template_type', 'custom_content')
 
     def template_type(self, obj):
         return obj.template.get_template_type_display()
     template_type.short_description = 'Template'
-    template_type.admin_order_field = 'template__template_type'
 
     def custom_content_preview(self, obj):
         return obj.custom_content[:100] + '...' if len(obj.custom_content) > 100 else obj.custom_content
@@ -250,7 +224,7 @@ class AccessTokenAdmin(admin.ModelAdmin):
     list_display = ('user_name', 'guild', 'created_at', 'expires_at', 'is_valid_display')
     list_filter = ('guild',)
     readonly_fields = ('token', 'created_at')
-    
+
     def is_valid_display(self, obj):
         return obj.is_valid()
     is_valid_display.boolean = True

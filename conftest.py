@@ -1,152 +1,138 @@
 """
-Pytest configuration and fixtures for integration tests
+Shared test fixtures for django-discord-bot.
+
+Provides:
+  - test_guild:  A GuildSettings instance with bounce/pending channel IDs
+  - test_automations:  Default Automation + Action rows for the test guild
 """
-import os
-import asyncio
-import threading
-from pathlib import Path
-
-# Load .env file before anything else
-from dotenv import load_dotenv
-load_dotenv(Path(__file__).parent / '.env')
-
-import django
-from django.conf import settings
-
-# Configure Django before importing models
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'project.settings')
-django.setup()
 
 import pytest
-from asgiref.sync import async_to_sync
-from core.models import GuildSettings, BotCommand, CommandAction
-import discord
-from discord.ext import commands
+from core.models import (
+    GuildSettings, DiscordRole, InviteRule,
+    Application, Automation, Action,
+)
+from bot.handlers.templates import init_default_templates
 
 
 @pytest.fixture
-def test_guild():
-    """Create a test guild"""
-    guild = GuildSettings.objects.create(
-        guild_id=888888888888888888,
-        guild_name='TestGuild',
-        bot_admin_role_id=777777777777777777,
-        pending_role_id=666666666666666666,
-        logs_channel_id=555555555555555555,
-        mode='AUTO'
+def test_guild(db):
+    """Create a GuildSettings with roles and channels configured."""
+    gs = GuildSettings.objects.create(
+        guild_id=123456789,
+        guild_name='Test Server',
+        bot_admin_role_id=111111111,
+        pending_role_id=222222222,
+        bounce_channel_id=555555555,
+        pending_channel_id=777777777,
+        mode='AUTO',
     )
-    yield guild
-    # Cleanup
-    guild.delete()
+
+    # Cache some roles
+    DiscordRole.objects.create(discord_id=111111111, guild=gs, name='BotAdmin')
+    DiscordRole.objects.create(discord_id=222222222, guild=gs, name='Pending')
+    DiscordRole.objects.create(discord_id=333333333, guild=gs, name='Members')
+
+    # Default invite rule
+    rule = InviteRule.objects.create(guild=gs, invite_code='default', description='Default rule')
+    members_role = DiscordRole.objects.get(discord_id=333333333, guild=gs)
+    rule.roles.add(members_role)
+
+    # Seed templates
+    init_default_templates()
+
+    return gs
 
 
 @pytest.fixture
-def test_commands(test_guild):
-    """Create all 9 default test commands"""
-    commands_config = [
-        ('help', 'LIST_COMMANDS'),
-        ('listrules', 'LIST_INVITE_RULES'),
-        ('addrule', 'ADD_INVITE_RULE'),
-        ('delrule', 'DELETE_INVITE_RULE'),
-        ('setmode', 'SET_SERVER_MODE'),
-        ('getaccess', 'GENERATE_ACCESS_TOKEN'),
-        ('addfield', 'ADD_FORM_FIELD'),
-        ('listfields', 'LIST_FORM_FIELDS'),
-        ('reload', 'RELOAD_CONFIG'),
-    ]
-    
-    commands = []
-    for name, action_type in commands_config:
-        cmd = BotCommand.objects.create(
-            guild=test_guild,
-            name=name,
-            enabled=True,
-            description=f'Test {name} command'
-        )
-        
-        action = CommandAction.objects.create(
-            command=cmd,
-            type=action_type,
-            parameters={},
-            order=1,
-            enabled=True
-        )
-        
-        commands.append(cmd)
-    
-    yield commands
-    
-    # Cleanup
-    BotCommand.objects.filter(guild=test_guild).delete()
+def test_automations(test_guild):
+    """Create default automations that mirror guild_setup defaults."""
+    gs = test_guild
+
+    # AUTO mode: log + assign roles
+    auto_log = Automation.objects.create(
+        guild=gs, name='Log Join (Auto)', trigger='MEMBER_JOIN',
+        trigger_config={'mode': 'AUTO'}, enabled=True,
+    )
+    Action.objects.create(
+        automation=auto_log, order=1, action_type='SEND_EMBED',
+        config={'channel': 'bounce', 'template': 'JOIN_LOG_AUTO', 'color': 0x2ecc71},
+    )
+    Action.objects.create(
+        automation=auto_log, order=2, action_type='ADD_ROLE',
+        config={'from_rule': True},
+    )
+
+    # APPROVAL mode: pending role + application embed + DM
+    auto_approval = Automation.objects.create(
+        guild=gs, name='Approval Join', trigger='MEMBER_JOIN',
+        trigger_config={'mode': 'APPROVAL'}, enabled=True,
+    )
+    Action.objects.create(
+        automation=auto_approval, order=1, action_type='ADD_ROLE',
+        config={'role': 'pending'},
+    )
+    Action.objects.create(
+        automation=auto_approval, order=2, action_type='SEND_EMBED',
+        config={'channel': 'bounce', 'template': 'application', 'track': True},
+    )
+    Action.objects.create(
+        automation=auto_approval, order=3, action_type='SEND_DM',
+        config={'template': 'WELCOME_DM_APPROVAL'},
+    )
+
+    return {'auto_log': auto_log, 'auto_approval': auto_approval}
 
 
 @pytest.fixture
-def db_session():
-    """Enable database access in tests"""
-    return None
+def test_application(test_guild):
+    """Create a pending application."""
+    return Application.objects.create(
+        guild=test_guild,
+        user_id=999888777,
+        user_name='TestUser#1234',
+        invite_code='abc123',
+        inviter_name='Inviter',
+        status='PENDING',
+        responses={},
+    )
 
 
-@pytest.fixture(scope='session')
-def integration_bot():
-    """
-    Start discord bot for integration tests.
-    
-    Bot runs in background thread during tests.
-    Automatically connects to Discord and loads guilds.
-    """
-    token = os.getenv('DISCORD_TOKEN')
-    if not token:
-        pytest.skip("DISCORD_TOKEN not set - integration tests skipped")
-        return None
-    
-    # Create bot instance for testing
-    intents = discord.Intents.default()
-    intents.members = True
-    intents.guilds = True
-    intents.invites = True
-    intents.message_content = True
-    
-    test_bot = commands.Bot(command_prefix="!", intents=intents)
-    test_bot.remove_command('help')
-    
-    # Track if successfully connected
-    ready_event = asyncio.Event()
-    
-    @test_bot.event
-    async def on_ready():
-        print(f"\n🤖 Test bot connected: {test_bot.user.name}")
-        print(f"📋 Loaded {len(test_bot.guilds)} guilds")
-        ready_event.set()
-    
-    async def run_bot():
-        """Run bot in background"""
-        try:
-            await test_bot.start(token)
-        except KeyboardInterrupt:
-            pass
-        except Exception as e:
-            print(f"❌ Bot error: {e}")
-    
-    # Start bot in background thread
-    def bot_thread():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(run_bot())
-    
-    thread = threading.Thread(target=bot_thread, daemon=True)
-    thread.start()
-    
-    # Wait for bot to be ready (timeout 30 seconds)
-    try:
-        asyncio.run(asyncio.wait_for(ready_event.wait(), timeout=30))
-    except asyncio.TimeoutError:
-        pytest.skip("Bot failed to connect within 30 seconds")
-    
-    yield test_bot
-    
-    # Cleanup on test completion
-    try:
-        if test_bot and test_bot.user:
-            asyncio.run(test_bot.close())
-    except:
-        pass
+@pytest.fixture
+def test_form_fields(test_guild):
+    """Create form fields with a ROLES dropdown for form-based approval tests."""
+    from core.models import Dropdown, FormField, DiscordChannel
+
+    # Roles dropdown (Members role already created in test_guild)
+    members_role = DiscordRole.objects.get(discord_id=333333333, guild=test_guild)
+    dd_roles = Dropdown.objects.create(
+        guild=test_guild, name='Role picker', source_type='ROLES', multiselect=False,
+    )
+    dd_roles.roles.add(members_role)
+
+    # Channels dropdown
+    ch = DiscordChannel.objects.create(discord_id=444444444, guild=test_guild, name='general')
+    dd_channels = Dropdown.objects.create(
+        guild=test_guild, name='Channel picker', source_type='CHANNELS', multiselect=True,
+    )
+    dd_channels.channels.add(ch)
+
+    f_name = FormField.objects.create(
+        guild=test_guild, label='Name', field_type='text', order=1,
+    )
+    f_role = FormField.objects.create(
+        guild=test_guild, label='Pick Role', field_type='dropdown',
+        dropdown=dd_roles, order=2,
+    )
+    f_channel = FormField.objects.create(
+        guild=test_guild, label='Pick Channel', field_type='dropdown',
+        dropdown=dd_channels, order=3,
+    )
+
+    return {
+        'name_field': f_name,
+        'role_field': f_role,
+        'channel_field': f_channel,
+        'roles_dropdown': dd_roles,
+        'channels_dropdown': dd_channels,
+        'channel': ch,
+    }

@@ -1,217 +1,441 @@
 """
-Unit tests for core.services — pure Django, no Discord mocks needed.
+Unit tests for core.services — event handlers and command routing.
 
-Services take plain dicts and return action lists. Tests verify:
-- Correct actions are returned
-- Database state changes as expected
-- Permission gates work
+Uses the test_guild + test_automations fixtures from conftest.py.
+All business logic tested through the public API (handle_* functions).
 """
+
 import pytest
-from django.test import TestCase
-from core.models import (
-    GuildSettings, BotCommand, CommandAction, InviteRule,
-    DiscordRole, DiscordChannel, Application,
+from core.models import Application, Automation
+from core.services import (
+    handle_member_join, handle_member_remove, handle_command, handle_reaction,
+    process_event, BUILTIN_COMMANDS,
 )
-from core.services import handle_command, handle_member_join, handle_member_remove
 
 
-@pytest.mark.django_db
-class TestServiceHandlers(TestCase):
-    """Test core.services with plain dicts — no Discord needed."""
+class TestMemberJoinAuto:
+    """Tests for AUTO mode member joins."""
 
-    def setUp(self):
-        self.gs = GuildSettings.objects.create(
-            guild_id=999999999999999999,
-            guild_name='TestGuild',
-            bot_admin_role_id=111111111111111111,
-            pending_role_id=666666666666666666,
-            logs_channel_id=555555555555555555,
-            mode='AUTO',
-        )
-        for name, action_type in [
-            ('addrule', 'ADD_INVITE_RULE'),
-            ('delrule', 'DELETE_INVITE_RULE'),
-            ('listrules', 'LIST_INVITE_RULES'),
-            ('setmode', 'SET_SERVER_MODE'),
-            ('help', 'LIST_COMMANDS'),
-            ('listfields', 'LIST_FORM_FIELDS'),
-            ('reload', 'RELOAD_CONFIG'),
-            ('approve', 'APPROVE_APPLICATION'),
-            ('reject', 'REJECT_APPLICATION'),
-        ]:
-            cmd = BotCommand.objects.create(guild=self.gs, name=name, enabled=True, description=f'{name} cmd')
-            CommandAction.objects.create(command=cmd, type=action_type, parameters={}, order=1, enabled=True)
-
-    def tearDown(self):
-        self.gs.delete()
-
-    def _admin_event(self, command, args=None, **extra):
+    def test_auto_join_returns_embed_and_role(self, test_guild, test_automations):
         event = {
-            'command': command,
-            'args': args or [],
-            'guild_id': self.gs.guild_id,
-            'channel_id': 555555555555555555,
-            'author': {'id': 100, 'name': 'Admin', 'role_ids': [self.gs.bot_admin_role_id]},
-            'user_mentions': [],
-            'role_mentions': [],
+            'guild_id': test_guild.guild_id,
+            'member': {'id': 42, 'name': 'NewUser'},
+            'invite': {'code': 'default', 'inviter_id': 1, 'inviter_name': 'Someone'},
         }
-        event.update(extra)
-        return event
+        actions = handle_member_join(event)
 
-    # ── addrule / delrule / listrules ─────────────────────────────────────
+        types = [a['type'] for a in actions]
+        assert 'send_embed' in types
+        assert 'add_role' in types
 
-    def test_addrule_success(self):
-        DiscordRole.objects.create(guild=self.gs, discord_id=222, name='Member')
-        event = self._admin_event('addrule', ['testcode', 'Member', 'A', 'rule'],
-                                  guild_roles=[{'id': 222, 'name': 'Member'}])
+    def test_auto_join_no_matching_rule(self, test_guild, test_automations):
+        event = {
+            'guild_id': test_guild.guild_id,
+            'member': {'id': 42, 'name': 'NewUser'},
+            'invite': {'code': 'unknown_code', 'inviter_id': 1, 'inviter_name': 'Someone'},
+        }
+        actions = handle_member_join(event)
+        # Falls back to 'default' rule
+        role_actions = [a for a in actions if a['type'] == 'add_role']
+        assert len(role_actions) >= 1
+
+    @pytest.mark.django_db
+    def test_no_guild_returns_empty(self):
+        event = {
+            'guild_id': 999999,
+            'member': {'id': 42, 'name': 'Ghost'},
+            'invite': {},
+        }
+        assert handle_member_join(event) == []
+
+
+class TestMemberJoinApproval:
+    """Tests for APPROVAL mode member joins."""
+
+    def test_approval_creates_application(self, test_guild, test_automations):
+        test_guild.mode = 'APPROVAL'
+        test_guild.save()
+
+        event = {
+            'guild_id': test_guild.guild_id,
+            'member': {'id': 42, 'name': 'PendingUser'},
+            'invite': {'code': 'abc', 'inviter_id': 1, 'inviter_name': 'Inv'},
+        }
+        actions = handle_member_join(event)
+
+        types = [a['type'] for a in actions]
+        assert 'add_role' in types  # pending role
+        assert 'send_embed_tracked' in types  # application embed
+        assert Application.objects.filter(guild=test_guild, user_id=42).exists()
+
+
+class TestMemberRemove:
+    def test_cancels_pending_applications(self, test_guild, test_application):
+        event = {'guild_id': test_guild.guild_id, 'user_id': test_application.user_id}
+        handle_member_remove(event)
+
+        test_application.refresh_from_db()
+        assert test_application.status == 'REJECTED'
+
+
+class TestHandleCommand:
+    """Tests for built-in command routing."""
+
+    def test_all_builtins_registered(self):
+        expected = {'help', 'addrule', 'delrule', 'listrules', 'setmode',
+                    'listfields', 'reload', 'approve', 'reject'}
+        assert expected == set(BUILTIN_COMMANDS.keys())
+
+    def test_help_returns_reply(self, test_guild):
+        event = {
+            'command': 'help',
+            'args': [],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+        }
         actions = handle_command(event)
-        assert any('testcode' in a.get('content', '') for a in actions)
-        assert InviteRule.objects.filter(guild=self.gs, invite_code='testcode').exists()
+        assert any(a['type'] == 'reply' for a in actions)
+        assert 'Available Commands' in actions[0]['content']
 
-    def test_addrule_bad_role(self):
-        event = self._admin_event('addrule', ['code', 'Fake'], guild_roles=[])
+    def test_setmode_changes_mode(self, test_guild):
+        event = {
+            'command': 'setmode',
+            'args': ['APPROVAL'],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+        }
         actions = handle_command(event)
-        assert any('not found' in a.get('content', '').lower() or 'error' in a.get('content', '').lower() for a in actions)
+        test_guild.refresh_from_db()
+        assert test_guild.mode == 'APPROVAL'
 
-    def test_delrule_success(self):
-        InviteRule.objects.create(guild=self.gs, invite_code='todelete')
-        actions = handle_command(self._admin_event('delrule', ['todelete']))
-        assert not InviteRule.objects.filter(guild=self.gs, invite_code='todelete').exists()
+    def test_non_admin_rejected(self, test_guild):
+        event = {
+            'command': 'setmode',
+            'args': ['AUTO'],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 99, 'name': 'Pleb', 'role_ids': [999]},
+        }
+        actions = handle_command(event)
+        assert any('BotAdmin' in a.get('content', '') for a in actions)
 
-    def test_delrule_not_found(self):
-        actions = handle_command(self._admin_event('delrule', ['nope']))
-        assert any('not found' in a.get('content', '').lower() or 'error' in a.get('content', '').lower() for a in actions)
-
-    def test_listrules_empty(self):
-        actions = handle_command(self._admin_event('listrules'))
-        assert any('no rules' in a.get('content', '').lower() for a in actions)
-
-    def test_listrules_with_data(self):
-        InviteRule.objects.create(guild=self.gs, invite_code='c1', description='R1')
-        actions = handle_command(self._admin_event('listrules'))
-        assert any(a['type'] == 'send_embed' for a in actions)
-
-    # ── setmode ──────────────────────────────────────────────────────────
-
-    def test_setmode_approval(self):
-        actions = handle_command(self._admin_event('setmode', ['APPROVAL']))
-        self.gs.refresh_from_db()
-        assert self.gs.mode == 'APPROVAL'
-        assert any(a['type'] == 'ensure_resources' for a in actions)
-
-    def test_setmode_auto(self):
-        self.gs.mode = 'APPROVAL'
-        self.gs.save()
-        actions = handle_command(self._admin_event('setmode', ['AUTO']))
-        self.gs.refresh_from_db()
-        assert self.gs.mode == 'AUTO'
-
-    def test_setmode_invalid(self):
-        actions = handle_command(self._admin_event('setmode', ['BANANA']))
-        assert any('must be' in a.get('content', '').lower() or 'error' in a.get('content', '').lower() for a in actions)
-
-    # ── listcommands / listfields ────────────────────────────────────────
-
-    def test_listcommands(self):
-        actions = handle_command(self._admin_event('help'))
+    def test_unknown_command_shows_list(self, test_guild):
+        event = {
+            'command': 'nonexistent',
+            'args': [],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+        }
+        actions = handle_command(event)
         assert any(a['type'] == 'reply' for a in actions)
 
-    def test_listfields_empty(self):
-        actions = handle_command(self._admin_event('listfields'))
-        assert any('no form fields' in a.get('content', '').lower() for a in actions)
-
-    # ── permission gate ──────────────────────────────────────────────────
-
-    def test_non_admin_blocked(self):
-        event = self._admin_event('addrule', ['code', 'Role'])
-        event['author']['role_ids'] = []
+    def test_listrules_returns_embed(self, test_guild):
+        event = {
+            'command': 'listrules',
+            'args': [],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+        }
         actions = handle_command(event)
-        assert any('botadmin' in a.get('content', '').lower() for a in actions)
+        assert any(a['type'] == 'send_embed' for a in actions)
 
-    def test_unknown_command(self):
-        event = self._admin_event('nonexistent')
+    def test_approve_no_application(self, test_guild):
+        event = {
+            'command': 'approve',
+            'args': ['<@42>'],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+            'user_mentions': [{'id': 42, 'name': 'Nobody'}],
+            'role_mentions': [],
+        }
+        actions = handle_command(event)
+        assert any('No pending application' in a.get('content', '') for a in actions)
+
+
+class TestHandleReaction:
+    def test_approve_via_reaction(self, test_guild, test_application):
+        test_guild.mode = 'APPROVAL'
+        test_guild.save()
+
+        event = {
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'message_id': 12345,
+            'emoji': '\u2705',
+            'application_id': test_application.id,
+            'admin': {'id': 1, 'name': 'Admin'},
+            'original_embed': {'title': 'App', 'fields': []},
+        }
+        actions = handle_reaction(event)
+
+        types = [a['type'] for a in actions]
+        assert 'remove_role' in types  # remove pending
+        assert 'send_dm' in types  # DM user
+        assert not Application.objects.filter(id=test_application.id).exists()  # deleted on approve
+
+    def test_reject_via_reaction(self, test_guild, test_application):
+        event = {
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'message_id': 12345,
+            'emoji': '\u274c',
+            'application_id': test_application.id,
+            'admin': {'id': 1, 'name': 'Admin'},
+            'original_embed': {'title': 'App', 'fields': []},
+        }
+        actions = handle_reaction(event)
+        test_application.refresh_from_db()
+        assert test_application.status == 'REJECTED'
+
+    def test_invalid_emoji_ignored(self, test_guild, test_application):
+        event = {
+            'guild_id': test_guild.guild_id,
+            'emoji': '\U0001f44d',
+            'application_id': test_application.id,
+            'admin': {'id': 1, 'name': 'Admin'},
+        }
+        assert handle_reaction(event) == []
+
+
+class TestAddruleDelrule:
+    """Tests for addrule / delrule built-in commands."""
+
+    def test_addrule_creates_rule(self, test_guild):
+        event = {
+            'command': 'addrule',
+            'args': ['mycode', 'Members', 'Test rule'],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+            'guild_roles': [{'id': 333333333, 'name': 'Members'}],
+        }
+        actions = handle_command(event)
+        assert any('mycode' in a.get('content', '') for a in actions)
+
+        from core.models import InviteRule
+        rule = InviteRule.objects.get(guild=test_guild, invite_code='mycode')
+        assert rule.roles.count() == 1
+        assert rule.roles.first().discord_id == 333333333
+
+    def test_addrule_requires_admin(self, test_guild):
+        event = {
+            'command': 'addrule',
+            'args': ['mycode', 'Members'],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 99, 'name': 'Pleb', 'role_ids': [999]},
+        }
+        actions = handle_command(event)
+        assert any('BotAdmin' in a.get('content', '') for a in actions)
+
+    def test_addrule_missing_args(self, test_guild):
+        event = {
+            'command': 'addrule',
+            'args': ['mycode'],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+        }
+        actions = handle_command(event)
+        assert any('Usage' in a.get('content', '') for a in actions)
+
+    def test_delrule_removes_rule(self, test_guild):
+        from core.models import InviteRule
+        rule = InviteRule.objects.create(guild=test_guild, invite_code='temp')
+        event = {
+            'command': 'delrule',
+            'args': ['temp'],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+        }
+        actions = handle_command(event)
+        assert any('deleted' in a.get('content', '') for a in actions)
+        assert not InviteRule.objects.filter(guild=test_guild, invite_code='temp').exists()
+
+    def test_delrule_not_found(self, test_guild):
+        event = {
+            'command': 'delrule',
+            'args': ['noexist'],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+        }
         actions = handle_command(event)
         assert any('not found' in a.get('content', '').lower() for a in actions)
 
-    # ── member_join ──────────────────────────────────────────────────────
 
-    def test_member_join_auto_with_rule(self):
-        role = DiscordRole.objects.create(guild=self.gs, discord_id=333, name='Verified')
-        rule = InviteRule.objects.create(guild=self.gs, invite_code='inv1')
-        rule.roles.add(role)
+class TestRejectCommand:
+    """Tests for the reject built-in command."""
 
-        actions = handle_member_join({
-            'guild_id': self.gs.guild_id,
-            'member': {'id': 400, 'name': 'NewUser'},
-            'invite': {'code': 'inv1', 'inviter_id': 500, 'inviter_name': 'Inviter'},
-        })
-        assert any(a['type'] == 'add_role' and a['role_id'] == 333 for a in actions)
-
-    def test_member_join_auto_default_rule(self):
-        role = DiscordRole.objects.create(guild=self.gs, discord_id=444, name='Default')
-        rule = InviteRule.objects.create(guild=self.gs, invite_code='default')
-        rule.roles.add(role)
-
-        actions = handle_member_join({
-            'guild_id': self.gs.guild_id,
-            'member': {'id': 401, 'name': 'NewUser2'},
-            'invite': {'code': 'unknowncode', 'inviter_id': None, 'inviter_name': 'Unknown'},
-        })
-        assert any(a['type'] == 'add_role' and a['role_id'] == 444 for a in actions)
-
-    def test_member_join_approval_creates_application(self):
-        self.gs.mode = 'APPROVAL'
-        self.gs.save()
-
-        actions = handle_member_join({
-            'guild_id': self.gs.guild_id,
-            'member': {'id': 402, 'name': 'Applicant'},
-            'invite': {'code': 'inv2', 'inviter_id': 600, 'inviter_name': 'Ref'},
-        })
-        assert any(a['type'] == 'add_role' and a['role_id'] == self.gs.pending_role_id for a in actions)
-        assert Application.objects.filter(guild=self.gs, user_id=402, status='PENDING').exists()
-
-    # ── member_remove ────────────────────────────────────────────────────
-
-    def test_member_remove_cancels_pending(self):
-        Application.objects.create(guild=self.gs, user_id=700, user_name='Leaver', status='PENDING', responses={})
-        handle_member_remove({'guild_id': self.gs.guild_id, 'user_id': 700})
-        assert Application.objects.get(user_id=700).status == 'REJECTED'
-
-    # ── approve / reject ─────────────────────────────────────────────────
-
-    def test_approve_deletes_application(self):
-        app = Application.objects.create(guild=self.gs, user_id=800, user_name='User', status='PENDING', responses={})
-        event = self._admin_event('approve', [f'<@800>'], user_mentions=[{'id': 800, 'name': 'User'}])
+    def test_reject_marks_rejected(self, test_guild, test_application):
+        event = {
+            'command': 'reject',
+            'args': ['<@999888777>', 'Spam', 'account'],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+            'user_mentions': [{'id': 999888777, 'name': 'TestUser#1234'}],
+            'role_mentions': [],
+        }
         actions = handle_command(event)
-        assert not Application.objects.filter(id=app.id).exists()
+        test_application.refresh_from_db()
+        assert test_application.status == 'REJECTED'
         assert any(a['type'] == 'send_dm' for a in actions)
 
-    def test_reject_updates_application(self):
-        app = Application.objects.create(guild=self.gs, user_id=801, user_name='User2', status='PENDING', responses={})
-        event = self._admin_event('reject', [f'<@801>', 'bad', 'behavior'], user_mentions=[{'id': 801, 'name': 'User2'}])
+    def test_reject_no_pending(self, test_guild):
+        event = {
+            'command': 'reject',
+            'args': ['<@42>'],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+            'user_mentions': [{'id': 42, 'name': 'Nobody'}],
+            'role_mentions': [],
+        }
         actions = handle_command(event)
-        app.refresh_from_db()
-        assert app.status == 'REJECTED'
-        assert any(a['type'] == 'send_dm' for a in actions)
+        assert any('No pending application' in a.get('content', '') for a in actions)
 
-    # ── reload ───────────────────────────────────────────────────────────
 
-    def test_reload_syncs_data(self):
-        event = self._admin_event('reload',
-                                  guild_roles=[{'id': 10, 'name': 'R1'}],
-                                  guild_channels=[{'id': 20, 'name': 'C1'}],
-                                  guild_members=[])
+class TestListfieldsCommand:
+    def test_listfields_empty(self, test_guild):
+        event = {
+            'command': 'listfields',
+            'args': [],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+        }
         actions = handle_command(event)
-        assert DiscordRole.objects.filter(guild=self.gs, discord_id=10).exists()
-        assert DiscordChannel.objects.filter(guild=self.gs, discord_id=20).exists()
-        assert any(a['type'] == 'ensure_resources' for a in actions)
+        assert any('No form fields' in a.get('content', '') for a in actions)
 
-    def test_reload_creates_missing_applications(self):
-        self.gs.mode = 'APPROVAL'
-        self.gs.save()
-        event = self._admin_event('reload',
-                                  guild_roles=[], guild_channels=[],
-                                  guild_members=[{'id': 900, 'name': 'User', 'bot': False}])
+    def test_listfields_with_fields(self, test_guild, test_form_fields):
+        event = {
+            'command': 'listfields',
+            'args': [],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+        }
         actions = handle_command(event)
-        assert Application.objects.filter(guild=self.gs, user_id=900, status='PENDING').exists()
+        embed_action = next(a for a in actions if a['type'] == 'send_embed')
+        field_names = [f['name'] for f in embed_action['embed']['fields']]
+        assert 'Name' in field_names
+        assert 'Pick Role' in field_names
+
+
+class TestReloadCommand:
+    def test_reload_syncs_roles_and_channels(self, test_guild):
+        from core.models import DiscordChannel
+        event = {
+            'command': 'reload',
+            'args': [],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+            'guild_roles': [
+                {'id': 111111111, 'name': 'BotAdmin'},
+                {'id': 333333333, 'name': 'Members'},
+                {'id': 444444444, 'name': 'NewRole'},
+            ],
+            'guild_channels': [
+                {'id': 555555555, 'name': 'general'},
+            ],
+            'guild_members': [],
+        }
+        actions = handle_command(event)
+        assert any('Reloaded' in a.get('content', '') for a in actions)
+        from core.models import DiscordRole
+        assert DiscordRole.objects.filter(guild=test_guild, discord_id=444444444).exists()
+        assert DiscordChannel.objects.filter(guild=test_guild, discord_id=555555555).exists()
+
+
+class TestProcessAction:
+    """Test individual action types via the automation engine."""
+
+    def test_send_message_action(self, test_guild):
+        auto = Automation.objects.create(
+            guild=test_guild, name='test_msg', trigger='MEMBER_JOIN',
+            trigger_config={}, enabled=True,
+        )
+        from core.models import Action
+        Action.objects.create(
+            automation=auto, order=1, action_type='SEND_MESSAGE',
+            config={'channel': 'bounce', 'content': 'Welcome!'},
+        )
+        event = {
+            'guild_id': test_guild.guild_id,
+            'member': {'id': 42, 'name': 'User'},
+            'invite': {'code': 'default'},
+        }
+        actions = process_event('MEMBER_JOIN', event)
+        msg = next((a for a in actions if a['type'] == 'send_message'), None)
+        assert msg is not None
+        assert msg['content'] == 'Welcome!'
+        assert msg['channel_id'] == test_guild.bounce_channel_id
+
+    def test_cleanup_action(self, test_guild):
+        auto = Automation.objects.create(
+            guild=test_guild, name='test_cleanup', trigger='MEMBER_JOIN',
+            trigger_config={}, enabled=True,
+        )
+        from core.models import Action
+        Action.objects.create(
+            automation=auto, order=1, action_type='CLEANUP',
+            config={'channel': 'bounce', 'count': 5},
+        )
+        event = {
+            'guild_id': test_guild.guild_id,
+            'member': {'id': 42, 'name': 'User'},
+            'invite': {'code': 'default'},
+        }
+        actions = process_event('MEMBER_JOIN', event)
+        cleanup = next((a for a in actions if a['type'] == 'cleanup_channel'), None)
+        assert cleanup is not None
+        assert cleanup['count'] == 5
+
+    def test_remove_role_action(self, test_guild):
+        auto = Automation.objects.create(
+            guild=test_guild, name='test_rr', trigger='MEMBER_JOIN',
+            trigger_config={}, enabled=True,
+        )
+        from core.models import Action
+        Action.objects.create(
+            automation=auto, order=1, action_type='REMOVE_ROLE',
+            config={'role': 'pending'},
+        )
+        event = {
+            'guild_id': test_guild.guild_id,
+            'member': {'id': 42, 'name': 'User'},
+            'invite': {'code': 'default'},
+        }
+        actions = process_event('MEMBER_JOIN', event)
+        rr = next((a for a in actions if a['type'] == 'remove_role'), None)
+        assert rr is not None
+        assert rr['role_id'] == test_guild.pending_role_id
+
+    def test_set_topic_action(self, test_guild):
+        auto = Automation.objects.create(
+            guild=test_guild, name='test_topic', trigger='MEMBER_JOIN',
+            trigger_config={}, enabled=True,
+        )
+        from core.models import Action
+        Action.objects.create(
+            automation=auto, order=1, action_type='SET_TOPIC',
+            config={'channel': 'pending', 'content': 'New topic'},
+        )
+        event = {
+            'guild_id': test_guild.guild_id,
+            'member': {'id': 42, 'name': 'User'},
+            'invite': {'code': 'default'},
+        }
+        actions = process_event('MEMBER_JOIN', event)
+        topic = next((a for a in actions if a['type'] == 'set_topic'), None)
+        assert topic is not None
+        assert topic['topic'] == 'New topic'
+        assert topic['channel_id'] == test_guild.pending_channel_id

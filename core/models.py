@@ -3,283 +3,284 @@ from django.utils import timezone
 import secrets
 
 
+# ── Guild Config ─────────────────────────────────────────────────────────────
+
 class GuildSettings(models.Model):
-    """Main settings for each Discord server"""
+    """Main settings for each Discord server."""
     guild_id = models.BigIntegerField(primary_key=True)
     guild_name = models.CharField(max_length=100)
-    
-    # Mode
+
     MODE_CHOICES = [('AUTO', 'Auto'), ('APPROVAL', 'Approval')]
     mode = models.CharField(max_length=20, choices=MODE_CHOICES, default='AUTO')
-    
-    # Required roles (stored by ID, auto-created if missing)
+
+    # Roles (auto-created by bot)
     bot_admin_role_id = models.BigIntegerField(null=True, blank=True)
     pending_role_id = models.BigIntegerField(null=True, blank=True)
-    
-    # Channels (stored by ID, auto-created if missing)
-    logs_channel_id = models.BigIntegerField(null=True, blank=True)
-    approvals_channel_id = models.BigIntegerField(null=True, blank=True)
+
+    # Channels — single #bounce channel replaces old logs+approvals
+    bounce_channel_id = models.BigIntegerField(null=True, blank=True)
     pending_channel_id = models.BigIntegerField(null=True, blank=True)
-    
-    # Metadata
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         db_table = 'guild_settings'
         verbose_name_plural = 'Guild Settings'
-    
+
     def __str__(self):
         return f"{self.guild_name} ({self.guild_id})"
 
 
+# ── Discord Cache ────────────────────────────────────────────────────────────
+
 class DiscordRole(models.Model):
-    """Cached Discord roles"""
+    """Cached Discord roles."""
     discord_id = models.BigIntegerField()
     guild = models.ForeignKey(GuildSettings, on_delete=models.CASCADE, related_name='roles')
     name = models.CharField(max_length=100)
-    
+
     class Meta:
         db_table = 'discord_roles'
         unique_together = ['guild', 'discord_id']
-    
+
     def __str__(self):
         return self.name
 
 
 class DiscordChannel(models.Model):
-    """Cached Discord channels"""
+    """Cached Discord channels."""
     discord_id = models.BigIntegerField()
     guild = models.ForeignKey(GuildSettings, on_delete=models.CASCADE, related_name='channels')
     name = models.CharField(max_length=100, blank=True, default='')
-    
+
     class Meta:
         db_table = 'discord_channels'
         unique_together = ['guild', 'discord_id']
-    
+
     def __str__(self):
         return self.name or f"Channel {self.discord_id}"
 
 
-class Dropdown(models.Model):
-    """Reusable dropdown definitions for form fields.
-    
-    Source types:
-    - ROLES: Pick specific roles from the guild (synced by reload)
-    - CHANNELS: Pick specific channels from the guild (synced by reload)
-    - CUSTOM: Admin defines options via DropdownOption entries
-    
-    For ROLES/CHANNELS: select which ones appear in the dropdown using
-    the roles/channels fields below. These are populated by the reload command.
+# ── Automations (replaces BotCommand + CommandAction) ────────────────────────
+
+class Automation(models.Model):
     """
+    Event trigger → actions.  The core building block for bot behaviour.
+
+    trigger_config examples:
+      MEMBER_JOIN  — {"mode": "AUTO"} or {"mode": "APPROVAL"} or {} (always)
+      COMMAND      — {"name": "welcome"}
+      FORM_SUBMIT  — {}
+      REACTION     — {"emoji": "✅"}
+    """
+    TRIGGERS = [
+        ('MEMBER_JOIN', 'Member Joins'),
+        ('MEMBER_LEAVE', 'Member Leaves'),
+        ('COMMAND', 'Bot Command'),
+        ('FORM_SUBMIT', 'Form Submitted'),
+        ('REACTION', 'Reaction Added'),
+    ]
+
+    guild = models.ForeignKey(GuildSettings, on_delete=models.CASCADE, related_name='automations')
+    name = models.CharField(max_length=100)
+    trigger = models.CharField(max_length=20, choices=TRIGGERS)
+    trigger_config = models.JSONField(
+        default=dict, blank=True,
+        help_text='Filter conditions as JSON. Leave {} to match all events of this trigger type.',
+    )
+    admin_only = models.BooleanField(default=False)
+    enabled = models.BooleanField(default=True)
+    description = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        db_table = 'automations'
+        ordering = ['name']
+        unique_together = ['guild', 'name']
+
+    def __str__(self):
+        return f"{self.name} [{self.get_trigger_display()}]"
+
+
+class Action(models.Model):
+    """
+    A single step in an automation pipeline.
+
+    config examples per action_type:
+      SEND_MESSAGE — {"channel": "bounce", "template": "JOIN_LOG_AUTO"}
+      SEND_DM      — {"template": "APPROVE_DM"}  or  {"content": "Hello!"}
+      SEND_EMBED   — {"channel": "bounce", "template": "application", "track": true}
+      ADD_ROLE     — {"role": "pending"}  or  {"from_rule": true}  or  {"from_form": true}
+      REMOVE_ROLE  — {"role": "pending"}
+      EDIT_MESSAGE — {"color": "green", "status_field": "✅ Approved by {admin}"}
+      SET_TOPIC    — {"channel": "pending", "template": "PENDING_CHANNEL_TOPIC"}
+      SET_PERMS    — {"channel": "from_form", "allow": ["read_messages"]}
+      CLEANUP      — {"channel": "bounce", "count": 10}
+    """
+    TYPES = [
+        ('SEND_MESSAGE', 'Send Channel Message'),
+        ('SEND_DM', 'Send DM'),
+        ('SEND_EMBED', 'Send Embed'),
+        ('ADD_ROLE', 'Add Role'),
+        ('REMOVE_ROLE', 'Remove Role'),
+        ('EDIT_MESSAGE', 'Edit Tracked Message'),
+        ('SET_TOPIC', 'Set Channel Topic'),
+        ('SET_PERMS', 'Grant Channel Access'),
+        ('CLEANUP', 'Delete Old Bot Messages'),
+    ]
+
+    automation = models.ForeignKey(Automation, on_delete=models.CASCADE, related_name='actions')
+    order = models.IntegerField(default=0)
+    action_type = models.CharField(max_length=20, choices=TYPES)
+    config = models.JSONField(
+        default=dict, blank=True,
+        help_text='Parameters as JSON.  See Automation docs for format per action type.',
+    )
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'actions'
+        ordering = ['order']
+
+    def __str__(self):
+        return f"{self.automation.name} → {self.get_action_type_display()} (#{self.order})"
+
+
+# ── Invite Rules ─────────────────────────────────────────────────────────────
+
+class InviteRule(models.Model):
+    """Invite code → roles mapping."""
+    guild = models.ForeignKey(GuildSettings, on_delete=models.CASCADE, related_name='rules')
+    invite_code = models.CharField(max_length=50)
+    roles = models.ManyToManyField(DiscordRole, related_name='rules')
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'invite_rules'
+        unique_together = ['guild', 'invite_code']
+
+    def __str__(self):
+        return f"{self.invite_code} → {', '.join(r.name for r in self.roles.all())}"
+
+
+# ── Forms ────────────────────────────────────────────────────────────────────
+
+class Dropdown(models.Model):
+    """Reusable dropdown definitions for form fields."""
     SOURCE_TYPES = [
         ('ROLES', 'Guild Roles'),
         ('CHANNELS', 'Guild Channels'),
         ('CUSTOM', 'Custom Options'),
     ]
-    
+
     guild = models.ForeignKey(GuildSettings, on_delete=models.CASCADE, related_name='dropdowns')
-    name = models.CharField(max_length=100, help_text="Display name, e.g. 'Role Picker', 'Region'")
-    source_type = models.CharField(max_length=20, choices=SOURCE_TYPES, help_text="Where the options come from")
-    multiselect = models.BooleanField(default=False, help_text="Allow picking multiple options")
-    
-    # For ROLES source: pick which guild roles appear in this dropdown
-    roles = models.ManyToManyField(
-        DiscordRole, blank=True, related_name='dropdowns',
-        help_text="Select roles to include. Leave empty = ALL guild roles. Only used when source is 'Guild Roles'."
-    )
-    # For CHANNELS source: pick which guild channels appear in this dropdown
-    channels = models.ManyToManyField(
-        DiscordChannel, blank=True, related_name='dropdowns',
-        help_text="Select channels to include. Leave empty = ALL guild channels. Only used when source is 'Guild Channels'."
-    )
-    
+    name = models.CharField(max_length=100)
+    source_type = models.CharField(max_length=20, choices=SOURCE_TYPES)
+    multiselect = models.BooleanField(default=False)
+    roles = models.ManyToManyField(DiscordRole, blank=True, related_name='dropdowns')
+    channels = models.ManyToManyField(DiscordChannel, blank=True, related_name='dropdowns')
+
     class Meta:
         db_table = 'dropdowns'
         unique_together = ['guild', 'name']
-    
+
     def __str__(self):
         multi = " (multi)" if self.multiselect else ""
         return f"{self.name} [{self.get_source_type_display()}]{multi}"
-    
+
     def get_options(self):
-        """Return list of {label, value} dicts for this dropdown's options."""
         if self.source_type == 'ROLES':
             qs = self.roles.all() if self.roles.exists() else DiscordRole.objects.filter(guild=self.guild)
             return [{'label': r.name, 'value': str(r.discord_id)} for r in qs]
         elif self.source_type == 'CHANNELS':
             qs = self.channels.all() if self.channels.exists() else DiscordChannel.objects.filter(guild=self.guild)
             return [{'label': c.name or f'#{c.discord_id}', 'value': str(c.discord_id)} for c in qs]
-        else:  # CUSTOM
+        else:
             return [{'label': o.label, 'value': o.value} for o in self.custom_options.all()]
 
 
 class DropdownOption(models.Model):
-    """Custom options for CUSTOM-type dropdowns.
-    Not needed for ROLES/CHANNELS (those auto-populate from Discord).
-    """
+    """Custom options for CUSTOM-type dropdowns."""
     dropdown = models.ForeignKey(Dropdown, on_delete=models.CASCADE, related_name='custom_options')
-    label = models.CharField(max_length=200, help_text="What the user sees")
-    value = models.CharField(max_length=200, help_text="What gets stored (can match label)")
+    label = models.CharField(max_length=200)
+    value = models.CharField(max_length=200)
     order = models.IntegerField(default=0)
-    
+
     class Meta:
         db_table = 'dropdown_options'
         ordering = ['order']
-    
+
     def __str__(self):
         return self.label
 
 
-class InviteRule(models.Model):
-    """Invite code -> roles mapping"""
-    guild = models.ForeignKey(GuildSettings, on_delete=models.CASCADE, related_name='rules')
-    invite_code = models.CharField(max_length=50)  # 'default' is special fallback
-    roles = models.ManyToManyField(DiscordRole, related_name='rules')
-    description = models.TextField(blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    
-    class Meta:
-        db_table = 'invite_rules'
-        unique_together = ['guild', 'invite_code']
-    
-    def __str__(self):
-        return f"{self.invite_code} -> {', '.join(r.name for r in self.roles.all())}"
-
-
 class FormField(models.Model):
-    """Dynamic form fields for approval applications.
-    
-    For dropdown fields, link to a Dropdown model instead of raw JSON.
-    The Dropdown can auto-populate from guild roles/channels or use custom options.
-    """
+    """Dynamic form fields for approval applications."""
     FIELD_TYPES = [
         ('text', 'Short Text'),
         ('textarea', 'Long Text'),
-        ('dropdown', 'Dropdown (link a Dropdown below)'),
+        ('dropdown', 'Dropdown'),
         ('checkbox', 'Yes/No Checkbox'),
         ('file', 'File Upload'),
     ]
-    
+
     guild = models.ForeignKey(GuildSettings, on_delete=models.CASCADE, related_name='form_fields')
-    label = models.CharField(max_length=200, help_text="Question shown to the user")
+    label = models.CharField(max_length=200)
     field_type = models.CharField(max_length=20, choices=FIELD_TYPES)
-    dropdown = models.ForeignKey(
-        Dropdown, null=True, blank=True, on_delete=models.SET_NULL,
-        help_text="Required for 'Dropdown' field type. Create one under Dropdowns first."
-    )
-    placeholder = models.CharField(
-        max_length=200, blank=True,
-        help_text="Placeholder text shown inside text/textarea fields"
-    )
+    dropdown = models.ForeignKey(Dropdown, null=True, blank=True, on_delete=models.SET_NULL)
+    placeholder = models.CharField(max_length=200, blank=True)
     required = models.BooleanField(default=True)
     order = models.IntegerField(default=0)
-    
+
     class Meta:
         db_table = 'form_fields'
         ordering = ['order']
-    
+
     def __str__(self):
         return f"{self.label} ({self.get_field_type_display()})"
 
 
+# ── Applications ─────────────────────────────────────────────────────────────
+
 class Application(models.Model):
-    """User applications in APPROVAL mode"""
+    """User applications in APPROVAL mode."""
     STATUS_CHOICES = [
         ('PENDING', 'Pending'),
         ('APPROVED', 'Approved'),
         ('REJECTED', 'Rejected'),
     ]
-    
+
     guild = models.ForeignKey(GuildSettings, on_delete=models.CASCADE, related_name='applications')
     user_id = models.BigIntegerField()
     user_name = models.CharField(max_length=100)
     invite_code = models.CharField(max_length=50)
     inviter_id = models.BigIntegerField(null=True, blank=True)
     inviter_name = models.CharField(max_length=100, blank=True)
-    
+
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
-    responses = models.JSONField()  # {field_id: value}
-    
+    responses = models.JSONField(default=dict)
+
+    # Discord message ID of the tracked embed in #bounce
+    message_id = models.BigIntegerField(null=True, blank=True)
+
     reviewed_by = models.BigIntegerField(null=True, blank=True)
     reviewed_by_name = models.CharField(max_length=100, blank=True, default='')
     reviewed_at = models.DateTimeField(null=True, blank=True)
-    
     created_at = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
         db_table = 'applications'
         ordering = ['-created_at']
-    
+
     def __str__(self):
         return f"{self.user_name} - {self.status}"
 
 
-class BotCommand(models.Model):
-    """Bot command with per-server configuration"""
-    guild = models.ForeignKey(GuildSettings, on_delete=models.CASCADE, related_name='commands', null=True, blank=True)
-    name = models.CharField(max_length=50)  # e.g., 'verify', 'welcome'
-    description = models.TextField(default='')
-    enabled = models.BooleanField(default=True)
-    custom_name = models.CharField(max_length=50, blank=True)  # Override display name for this server
-    
-    class Meta:
-        db_table = 'bot_commands'
-        unique_together = ['guild', 'name']
-    
-    def __str__(self):
-        display_name = self.custom_name or self.name
-        status = 'ON' if self.enabled else 'OFF'
-        guild_name = self.guild.guild_name if self.guild else 'Global'
-        return f"{guild_name}: {display_name} [{status}]"
-
-
-class CommandAction(models.Model):
-    """Executable action that chains in sequence within a command"""
-    ACTION_TYPES = [
-        # Basic actions
-        ('SEND_MESSAGE', 'Send Message'),
-        ('ASSIGN_ROLE', 'Assign Role'),
-        ('REMOVE_ROLE', 'Remove Role'),
-        ('CREATE_CHANNEL', 'Create Channel'),
-        ('DELETE_CHANNEL', 'Delete Channel'),
-        ('POLL', 'Create Poll'),
-        ('WEBHOOK', 'Call Webhook'),
-        # Command logic actions
-        ('ADD_INVITE_RULE', 'Add Invite Rule'),
-        ('DELETE_INVITE_RULE', 'Delete Invite Rule'),
-        ('LIST_INVITE_RULES', 'List Invite Rules'),
-        ('SET_SERVER_MODE', 'Set Server Mode'),
-        ('LIST_COMMANDS', 'List Commands'),
-        ('GENERATE_ACCESS_TOKEN', 'Generate Access Token'),
-        ('LIST_FORM_FIELDS', 'List Form Fields'),
-        ('RELOAD_CONFIG', 'Reload Configuration'),
-        ('APPROVE_APPLICATION', 'Approve Application'),
-        ('REJECT_APPLICATION', 'Reject Application'),
-    ]
-    
-    command = models.ForeignKey(BotCommand, on_delete=models.CASCADE, related_name='actions')
-    order = models.IntegerField(default=0)  # Execution order
-    type = models.CharField(max_length=30, choices=ACTION_TYPES)
-    name = models.CharField(max_length=100)  # Unique name within command, e.g., "send_welcome"
-    parameters = models.JSONField(
-        default=dict,
-        help_text='Auto-managed by the bot. Only edit if you know what you\'re doing. '
-                  'Format depends on action type, e.g. {"text": "Hello"} for SEND_MESSAGE.'
-    )
-    enabled = models.BooleanField(default=True)
-    
-    class Meta:
-        db_table = 'command_actions'
-        unique_together = ['command', 'name']
-        ordering = ['order']
-    
-    def __str__(self):
-        return f"{self.command.name}: {self.name} ({self.get_type_display()})"
-
+# ── Templates ────────────────────────────────────────────────────────────────
 
 class MessageTemplate(models.Model):
-    """Editable message templates"""
+    """Editable message templates."""
     TEMPLATE_TYPES = [
         ('INSTALL_WELCOME', 'Installation Welcome'),
         ('JOIN_LOG_AUTO', 'Join Log (AUTO mode)'),
@@ -303,51 +304,51 @@ class MessageTemplate(models.Model):
         ('COMMAND_SUCCESS', 'Command Success'),
         ('COMMAND_ERROR', 'Command Error'),
         ('COMMAND_NOT_FOUND', 'Command Not Found'),
-        ('COMMAND_DISABLED', 'Command Disabled'),
         ('DM_ONLY_WARNING', 'DM-Only Warning'),
         ('SERVER_ONLY_WARNING', 'Server-Only Warning'),
         ('SETUP_DIAGNOSTIC', 'Setup – Role Hierarchy Warning'),
     ]
-    
+
     template_type = models.CharField(max_length=50, choices=TEMPLATE_TYPES, unique=True)
     default_content = models.TextField()
-    
+
     class Meta:
         db_table = 'message_templates'
-    
+
     def __str__(self):
         return self.get_template_type_display()
 
 
 class GuildMessageTemplate(models.Model):
-    """Per-server template overrides"""
+    """Per-server template overrides."""
     guild = models.ForeignKey(GuildSettings, on_delete=models.CASCADE, related_name='message_templates')
     template = models.ForeignKey(MessageTemplate, on_delete=models.CASCADE)
     custom_content = models.TextField()
-    
+
     class Meta:
         db_table = 'guild_message_templates'
         unique_together = ['guild', 'template']
-    
+
     def __str__(self):
         return f"{self.guild.guild_name}: {self.template.template_type}"
 
 
+# ── Auth ─────────────────────────────────────────────────────────────────────
+
 class AccessToken(models.Model):
-    """24-hour access tokens for web panel"""
+    """24-hour access tokens for web panel."""
     token = models.CharField(max_length=64, unique=True, default=secrets.token_urlsafe)
     user_id = models.BigIntegerField()
     user_name = models.CharField(max_length=100)
     guild = models.ForeignKey(GuildSettings, on_delete=models.CASCADE)
-    
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
-    
+
     class Meta:
         db_table = 'access_tokens'
-    
+
     def is_valid(self):
         return timezone.now() < self.expires_at
-    
+
     def __str__(self):
-        return f"{self.user_name} -> {self.guild.guild_name}"
+        return f"{self.user_name} → {self.guild.guild_name}"
