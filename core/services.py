@@ -491,7 +491,7 @@ def _approve_user(gs, application, admin, event, extra_role_ids=None):
     # Cleanup old bot messages in bounce
     if gs.bounce_channel_id:
         actions.append({'type': 'cleanup_channel', 'channel_id': gs.bounce_channel_id,
-                       'count': 10, 'guild_id': gs.guild_id})
+                       'count': 50, 'guild_id': gs.guild_id})
 
     # Delete approved application
     application.delete()
@@ -628,6 +628,8 @@ def _cmd_help(gs, event):
         ('setmode', 'Set AUTO / APPROVAL mode (Admin)'),
         ('approve', 'Approve a pending user (Admin)'),
         ('reject', 'Reject a pending user (Admin)'),
+        ('cleanup', 'Delete resolved bot messages in #bounce (Admin)'),
+        ('cleanall', 'Delete ALL bot messages except pending apps (Admin)'),
         ('listfields', 'List form fields'),
         ('reload', 'Reload configuration (Admin)'),
         ('getaccess', 'Get web panel link (DM only)'),
@@ -890,6 +892,30 @@ def _cmd_getaccess(event):
         server=gs.guild_name, url=url, expires=expires_at.strftime('%Y-%m-%d %H:%M:%S UTC'))}]
 
 
+def _cmd_cleanup(gs, event):
+    """Delete resolved (non-pending) bot messages in bounce."""
+    _require_admin(gs, event['author']['role_ids'])
+    if not gs.bounce_channel_id:
+        raise _CmdError("No bounce channel configured.")
+    return [
+        {'type': 'cleanup_channel', 'channel_id': gs.bounce_channel_id,
+         'count': 50, 'guild_id': gs.guild_id},
+        {'type': 'reply', 'content': '\U0001f9f9 Cleaning resolved messages in #bounce (up to 50)...'},
+    ]
+
+
+def _cmd_cleanall(gs, event):
+    """Delete ALL bot messages except pending application embeds."""
+    _require_admin(gs, event['author']['role_ids'])
+    if not gs.bounce_channel_id:
+        raise _CmdError("No bounce channel configured.")
+    return [
+        {'type': 'cleanup_channel', 'channel_id': gs.bounce_channel_id,
+         'count': 999, 'guild_id': gs.guild_id},
+        {'type': 'reply', 'content': '\U0001f9f9 Cleaning ALL bot messages in #bounce (keeping pending apps)...'},
+    ]
+
+
 # Register built-in commands
 BUILTIN_COMMANDS.update({
     'help': _cmd_help,
@@ -901,4 +927,6 @@ BUILTIN_COMMANDS.update({
     'reload': _cmd_reload,
     'approve': _cmd_approve,
     'reject': _cmd_reject,
+    'cleanup': _cmd_cleanup,
+    'cleanall': _cmd_cleanall,
 })

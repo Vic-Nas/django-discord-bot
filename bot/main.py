@@ -192,9 +192,9 @@ async def _execute_one(action, context=None):
                     message_id__isnull=False,
                 ).values_list('message_id', flat=True))
             ))
-            count = action.get('count', 10)
+            count = action.get('count', 50)
             deleted = 0
-            async for msg in channel.history(limit=50):
+            async for msg in channel.history(limit=count * 3):
                 if msg.author.id != bot.user.id:
                     continue
                 if msg.id in protected:

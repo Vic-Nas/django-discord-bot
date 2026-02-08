@@ -83,7 +83,8 @@ class TestHandleCommand:
 
     def test_all_builtins_registered(self):
         expected = {'help', 'addrule', 'delrule', 'listrules', 'setmode',
-                    'listfields', 'reload', 'approve', 'reject'}
+                    'listfields', 'reload', 'approve', 'reject',
+                    'cleanup', 'cleanall'}
         assert expected == set(BUILTIN_COMMANDS.keys())
 
     def test_help_returns_reply(self, test_guild):
@@ -439,3 +440,56 @@ class TestProcessAction:
         assert topic is not None
         assert topic['topic'] == 'New topic'
         assert topic['channel_id'] == test_guild.pending_channel_id
+
+
+class TestCleanupCommands:
+    """Tests for cleanup / cleanall built-in commands."""
+
+    def test_cleanup_returns_cleanup_action(self, test_guild):
+        event = {
+            'command': 'cleanup',
+            'args': [],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+        }
+        actions = handle_command(event)
+        cleanup = next((a for a in actions if a['type'] == 'cleanup_channel'), None)
+        assert cleanup is not None
+        assert cleanup['count'] == 50
+        assert cleanup['channel_id'] == test_guild.bounce_channel_id
+
+    def test_cleanall_returns_high_count(self, test_guild):
+        event = {
+            'command': 'cleanall',
+            'args': [],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+        }
+        actions = handle_command(event)
+        cleanup = next((a for a in actions if a['type'] == 'cleanup_channel'), None)
+        assert cleanup is not None
+        assert cleanup['count'] == 999
+
+    def test_cleanup_requires_admin(self, test_guild):
+        event = {
+            'command': 'cleanup',
+            'args': [],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 99, 'name': 'Pleb', 'role_ids': [999]},
+        }
+        actions = handle_command(event)
+        assert any('BotAdmin' in a.get('content', '') for a in actions)
+
+    def test_cleanall_requires_admin(self, test_guild):
+        event = {
+            'command': 'cleanall',
+            'args': [],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 99, 'name': 'Pleb', 'role_ids': [999]},
+        }
+        actions = handle_command(event)
+        assert any('BotAdmin' in a.get('content', '') for a in actions)
