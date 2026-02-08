@@ -78,11 +78,9 @@ async def approve_application(bot, application, applicant, admin, message):
     guild_settings = await sync_to_async(lambda: application.guild)()
     guild = applicant.guild
     
-    # Update application status
-    application.status = 'APPROVED'
-    application.reviewed_by = admin.id
-    application.reviewed_at = timezone.now()
-    await sync_to_async(application.save)()
+    # Delete the approved application (only unapproved ones should remain in DB)
+    app_id = application.id
+    await sync_to_async(application.delete)()
     
     # Get rule for the invite code
     try:
@@ -151,7 +149,7 @@ async def approve_application(bot, application, applicant, admin, message):
     except:
         pass
     
-    print(f'✅ Application #{application.id} approved by {admin.name}')
+    print(f'✅ Application #{app_id} approved by {admin.name}')
 
 
 async def reject_application(bot, application, applicant, admin, message):
@@ -163,6 +161,7 @@ async def reject_application(bot, application, applicant, admin, message):
     # Update application status
     application.status = 'REJECTED'
     application.reviewed_by = admin.id
+    application.reviewed_by_name = admin.name
     application.reviewed_at = timezone.now()
     await sync_to_async(application.save)()
     

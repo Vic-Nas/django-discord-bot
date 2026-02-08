@@ -86,41 +86,48 @@ python bot/main.py
 
 ## Commands
 
-**Admin:**
+### Setup & Maintenance
+```
+@Bot reload
+  Sync roles/channels with Discord, ensure resources exist, create missing applications
+```
+
+### Server Configuration
 ```
 @Bot setmode AUTO|APPROVAL
-@Bot addrule <code> <roles>
+  AUTO: Instant role assignment based on invite code
+  APPROVAL: Require manual admin approval via form submissions
+
+@Bot addrule <code> @role [@role2 ...]
+  Map an invite code to Discord roles (assigned on join in AUTO mode)
+
 @Bot delrule <code>
+  Remove an invite rule
+
 @Bot listrules
-@Bot reload
-@Bot addfield "Question" text
+  Show all configured invite rules for this server
+
+@Bot addfield "Label" text|textarea|dropdown|checkbox
+  Add a custom form field (shown in APPROVAL mode)
+  
 @Bot listfields
+  List all custom form fields
 ```
 
-**General:**
+### Application Management (APPROVAL mode)
+```
+@Bot approve @user [@role ...]
+  Approve user's application, assign roles, remove Pending role, delete application record
+
+@Bot reject @user [reason]
+  Reject user's application, remove Pending role, keep rejection in database
+```
+
+### General
 ```
 @Bot help
+  Show available commands
+
 @Bot getaccess
+  Generate a 24-hour web panel access token (DM only)
 ```
-
----
-
-## Architecture
-
-- **Django**: Database + admin panel + API
-- **discord.py**: Bot (connects to Discord gateway)
-- **PostgreSQL**: Persistent data
-- **Railway**: Hosting
-
-Each guild has independent config (roles, rules, forms, messages).
-
----
-
-## Development
-
-All handlers include automated testing:
-- Unit tests verify logic
-- Integration tests verify Discord interaction
-- Run before commit: `pytest tests/ -v`
-
-See `bot/execution/action_executor.py` for command handlers.

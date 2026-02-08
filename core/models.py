@@ -202,6 +202,7 @@ class Application(models.Model):
     responses = models.JSONField()  # {field_id: value}
     
     reviewed_by = models.BigIntegerField(null=True, blank=True)
+    reviewed_by_name = models.CharField(max_length=100, blank=True, default='')
     reviewed_at = models.DateTimeField(null=True, blank=True)
     
     created_at = models.DateTimeField(auto_now_add=True)

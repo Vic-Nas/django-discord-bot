@@ -221,13 +221,13 @@ class TestHandlersWithRealGuild:
 
         await handle_approve_application(self.bot, message, {}, args, self.guild_settings)
 
-        # Verify application was approved
-        updated_app = await sync_to_async(Application.objects.get)(id=app.id)
-        assert updated_app.status == 'APPROVED' or updated_app.status == 'approved'
+        # Verify application was deleted (only unapproved applications should remain in DB)
+        try:
+            await sync_to_async(Application.objects.get)(id=app.id)
+            assert False, "Application should have been deleted"
+        except Application.DoesNotExist:
+            pass  # Expected
         assert message.channel.send.called
-
-        # Cleanup
-        await sync_to_async(updated_app.delete)()
     
     @pytest.mark.asyncio
     async def test_generate_access_token_dm_only(self):

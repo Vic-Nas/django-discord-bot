@@ -164,10 +164,10 @@ class FormFieldAdmin(admin.ModelAdmin):
 
 @admin.register(Application)
 class ApplicationAdmin(admin.ModelAdmin):
-    list_display = ('user_name', 'guild', 'status', 'invite_code', 'created_at')
+    list_display = ('user_name', 'guild', 'status', 'invite_code', 'reviewed_by_name', 'created_at')
     list_filter = ('guild', 'status')
     search_fields = ('user_name',)
-    readonly_fields = ('created_at', 'responses', 'status', 'reviewed_by', 'reviewed_at')
+    readonly_fields = ('created_at', 'responses', 'status', 'reviewed_by', 'reviewed_by_name', 'reviewed_at')
     
     def get_readonly_fields(self, request, obj=None):
         """Make status readonly - must use Discord commands to approve/reject"""
@@ -180,8 +180,8 @@ class ApplicationAdmin(admin.ModelAdmin):
             'fields': ('guild', 'user_id', 'user_name', 'invite_code', 'inviter_id', 'inviter_name'),
         }),
         ('Status', {
-            'fields': ('status', 'reviewed_by', 'reviewed_at'),
-            'description': '⚠️ To approve/reject applications and trigger role assignments, use Discord commands: <code>@Bot approve @user</code> or <code>@Bot reject @user</code>. Changing status here only updates the database.',
+            'fields': ('status', 'reviewed_by', 'reviewed_by_name', 'reviewed_at'),
+            'description': '⚠️ To reject applications, use Discord commands: <code>@Bot reject @user</code>. Changing status here only updates the database.',
         }),
         ('Responses', {
             'fields': ('responses',),

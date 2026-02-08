@@ -869,12 +869,9 @@ async def handle_approve_application(bot, message, params, args, guild_settings)
         except Exception:
             failed_channels.append(f'#{ch.name}')
 
-    # Update application status
+    # Delete the approved application (only unapproved ones should remain in DB)
     if application:
-        application.status = 'APPROVED'
-        application.reviewed_by = message.author.id
-        application.reviewed_at = timezone.now()
-        await sync_to_async(application.save)()
+        await sync_to_async(application.delete)()
 
     # Notify the user
     try:
@@ -942,6 +939,7 @@ async def handle_reject_application(bot, message, params, args, guild_settings):
     if application:
         application.status = 'REJECTED'
         application.reviewed_by = message.author.id
+        application.reviewed_by_name = message.author.name
         application.reviewed_at = timezone.now()
         await sync_to_async(application.save)()
 
@@ -1028,8 +1026,8 @@ async def handle_list_form_fields(bot, message, params, guild_settings):
 
 
 async def handle_reload_config(bot, message, params, guild_settings):
-    """RELOAD_CONFIG: Sync roles and channels with Discord, ensure resources exist"""
-    from core.models import DiscordRole, DiscordChannel
+    """RELOAD_CONFIG: Sync roles/channels, ensure resources exist, create missing applications"""
+    from core.models import DiscordRole, DiscordChannel, GuildSettings, Application
     from bot.handlers.templates import get_template_async
     from bot.handlers.guild_setup import ensure_required_resources
 
@@ -1041,7 +1039,6 @@ async def handle_reload_config(bot, message, params, guild_settings):
     # Ensure all required resources exist (creates missing channels/roles)
     await ensure_required_resources(bot, guild_settings)
     # Refresh guild_settings after ensure_required_resources may have saved
-    from core.models import GuildSettings
     guild_settings = await sync_to_async(GuildSettings.objects.get)(guild_id=guild_settings.guild_id)
     
     # Sync all roles
@@ -1062,6 +1059,37 @@ async def handle_reload_config(bot, message, params, guild_settings):
             defaults={'name': channel.name}
         )
     
+    # For APPROVAL mode: ensure all non-bot members have an Application record
+    missing_apps = 0
+    if guild_settings.mode == 'APPROVAL':
+        existing_user_ids = set(
+            await sync_to_async(
+                lambda: list(Application.objects.filter(guild=guild_settings).values_list('user_id', flat=True))
+            )()
+        )
+        
+        for member in message.guild.members:
+            if member.bot:
+                continue  # Skip bot accounts
+            
+            # Check if this member already has an application
+            if member.id not in existing_user_ids:
+                # Create missing application
+                await sync_to_async(Application.objects.create)(
+                    guild=guild_settings,
+                    user_id=member.id,
+                    user_name=str(member),
+                    invite_code='reload',  # Marks it as created by reload
+                    inviter_id=None,
+                    inviter_name='System (reload)',
+                    status='PENDING',
+                    responses={}
+                )
+                missing_apps += 1
+    
     template = await get_template_async(guild_settings, 'COMMAND_SUCCESS')
-    msg = template.format(message=f"Reloaded configuration ({len(roles)} roles, {len(channels)} channels). All resources verified.")
+    details = f"{len(roles)} roles, {len(channels)} channels"
+    if guild_settings.mode == 'APPROVAL':
+        details += f", {missing_apps} missing applications created"
+    msg = template.format(message=f"Reloaded configuration ({details}). All resources verified.")
     await message.channel.send(msg)
