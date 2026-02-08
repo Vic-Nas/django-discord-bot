@@ -6,6 +6,27 @@ Auto-assign roles via invite links with web admin panel. Two modes: **AUTO** (in
 
 ---
 
+## Architecture
+
+```
+Discord ← bot/main.py (single gateway)
+              ↓ events as dicts
+         core/services.py (all business logic)
+              ↓ action dicts
+         bot/main.py (executes on Discord)
+```
+
+Two systems in `services.py`:
+
+1. **Automations** (data-driven) — `Automation` → `Action` models, configured via admin panel.
+   Handles: member join flows, custom commands, form events.
+2. **Built-in commands** (code) — `approve`, `reject`, `addrule`, etc.
+   Complex stateful logic that doesn't fit in JSON config.
+
+The bot never contains business logic — it translates Discord events to dicts, calls `handle_*()`, and executes the returned action dicts.
+
+---
+
 ## Deploy to Railway
 
 [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app)
@@ -58,12 +79,14 @@ python manage.py init_defaults
 
 ### Run Tests
 ```bash
-# Unit tests (fast, ~30 seconds)
+# All tests (42 tests: unit + integration)
+pytest tests/ -v
+
+# Unit tests only
 pytest tests/test_handlers.py -v
 
-# Integration tests (with real Discord, ~3 minutes)
-# Stop Railway bot first, then:
-pytest tests/test_integration.py -m integration -v
+# Integration tests only
+pytest tests/test_integration.py -v
 ```
 
 ### Run Bot Locally
@@ -75,12 +98,13 @@ python bot/main.py
 
 ## Features
 
-- 🎯 **AUTO Mode** — Instant role assignment  
-- 📝 **APPROVAL Mode** — Forms + admin review  
-- 🌐 **Web Admin** — Manage visually  
-- 🔧 **Customizable** — Edit all messages  
-- 🔒 **Secure** — Token-based access  
-- 🏢 **Multi-Server** — Per-guild config  
+- 🎯 **AUTO Mode** — Instant role assignment via invite rules
+- 📝 **APPROVAL Mode** — Forms + admin review (approve/reject via command or reaction)
+- ⚙️ **Automation Engine** — Data-driven triggers + actions, configurable in admin
+- 🌐 **Web Admin** — Manage guilds, automations, forms, templates
+- 🔧 **Customizable Templates** — Per-guild message overrides
+- 🔒 **Secure** — Token-based web panel access
+- 🏢 **Multi-Server** — Per-guild config, roles, channels, rules
 
 ---
 
@@ -98,7 +122,7 @@ python bot/main.py
   AUTO: Instant role assignment based on invite code
   APPROVAL: Require manual admin approval via form submissions
 
-@Bot addrule <code> @role [@role2 ...]
+@Bot addrule <code> <role1,role2,...> [description]
   Map an invite code to Discord roles (assigned on join in AUTO mode)
 
 @Bot delrule <code>
@@ -107,27 +131,45 @@ python bot/main.py
 @Bot listrules
   Show all configured invite rules for this server
 
-@Bot addfield "Label" text|textarea|dropdown|checkbox
-  Add a custom form field (shown in APPROVAL mode)
-  
 @Bot listfields
-  List all custom form fields
+  List all custom form fields (configured in admin panel)
 ```
 
 ### Application Management (APPROVAL mode)
 ```
 @Bot approve @user [@role ...]
-  Approve user's application, assign roles, remove Pending role, delete application record
+  Approve user's application, assign roles from rules + form, remove Pending role
+
+@Bot approve @Role
+  Bulk approve all members with that role who have submitted their form
 
 @Bot reject @user [reason]
-  Reject user's application, remove Pending role, keep rejection in database
+  Reject user's application, remove Pending role, notify user via DM
 ```
 
 ### General
 ```
 @Bot help
-  Show available commands
+  Show available commands (including custom automation commands)
 
 @Bot getaccess
   Generate a 24-hour web panel access token (DM only)
 ```
+
+---
+
+## Models
+
+| Model | Purpose |
+|---|---|
+| `GuildSettings` | Per-guild config (mode, channels, admin role) |
+| `Automation` | Trigger → Actions pipeline (MEMBER_JOIN, COMMAND, etc.) |
+| `Action` | Single step in an automation (SEND_EMBED, ADD_ROLE, etc.) |
+| `InviteRule` | Invite code → role mapping |
+| `Application` | Pending/rejected user applications |
+| `FormField` | Custom form fields per guild |
+| `Dropdown` | Dropdown options (roles, channels, custom) |
+| `MessageTemplate` | Default message templates |
+| `GuildMessageTemplate` | Per-guild template overrides |
+| `DiscordRole` / `DiscordChannel` | Cached Discord entities |
+| `AccessToken` | Web panel auth tokens |
