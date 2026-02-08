@@ -20,6 +20,14 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'project.settings')
 django.setup()
 
+# Run pending migrations on startup (bot service has no Procfile)
+from django.core.management import call_command
+try:
+    call_command('migrate', '--noinput', verbosity=1)
+except Exception as e:
+    print(f'⚠️ Migration failed: {e}')
+
+from django.db import close_old_connections
 from core.services import handle_member_join, handle_member_remove, handle_reaction, handle_command
 from bot.handlers.guild_setup import setup_guild, ensure_required_resources
 
@@ -37,6 +45,12 @@ bot.remove_command('help')
 
 # Invite cache (purely Discord gateway state — stays in bot)
 invite_cache = {}
+
+
+async def db_call(func, *args, **kwargs):
+    """Call a sync Django function safely: close stale connections, run via sync_to_async."""
+    await sync_to_async(close_old_connections)()
+    return await sync_to_async(func)(*args, **kwargs)
 
 
 # ── Action executor ──────────────────────────────────────────────────────────
@@ -147,7 +161,7 @@ async def _execute_one(action, context=None):
 
     elif t == 'ensure_resources':
         from core.models import GuildSettings
-        gs = await sync_to_async(GuildSettings.objects.get)(guild_id=action['guild_id'])
+        gs = await db_call(GuildSettings.objects.get, guild_id=action['guild_id'])
         await ensure_required_resources(bot, gs)
 
 
@@ -238,14 +252,14 @@ async def on_member_join(member):
         'invite': invite_data,
     }
 
-    actions = await sync_to_async(handle_member_join)(event)
+    actions = await db_call(handle_member_join, event)
     await execute_actions(actions)
 
 
 @bot.event
 async def on_member_remove(member):
     event = {'guild_id': member.guild.id, 'user_id': member.id}
-    await sync_to_async(handle_member_remove)(event)
+    await db_call(handle_member_remove, event)
 
 
 @bot.event
@@ -298,7 +312,7 @@ async def on_raw_reaction_add(payload):
     # Check admin role before calling service
     from core.models import GuildSettings
     try:
-        gs = await sync_to_async(GuildSettings.objects.get)(guild_id=guild.id)
+        gs = await db_call(GuildSettings.objects.get, guild_id=guild.id)
     except:
         return
 
@@ -313,7 +327,7 @@ async def on_raw_reaction_add(payload):
     # Check applicant is still in guild
     from core.models import Application
     try:
-        app = await sync_to_async(Application.objects.get)(id=app_id, status='PENDING')
+        app = await db_call(Application.objects.get, id=app_id, status='PENDING')
     except:
         return
 
@@ -339,7 +353,7 @@ async def on_raw_reaction_add(payload):
         'original_embed': original_embed,
     }
 
-    actions = await sync_to_async(handle_reaction)(event)
+    actions = await db_call(handle_reaction, event)
     await execute_actions(actions)
 
 
@@ -405,7 +419,7 @@ async def on_message(message):
     if command_name == 'getaccess' and not message.guild:
         admin_guilds = []
         from core.models import GuildSettings
-        all_gs = await sync_to_async(lambda: list(GuildSettings.objects.filter(bot_admin_role_id__isnull=False)))()
+        all_gs = await db_call(lambda: list(GuildSettings.objects.filter(bot_admin_role_id__isnull=False)))
         for gs in all_gs:
             guild = bot.get_guild(gs.guild_id)
             if not guild:
@@ -440,7 +454,7 @@ async def on_message(message):
             event['admin_guilds'] = admin_guilds
 
     context = {'channel': message.channel}
-    actions = await sync_to_async(handle_command)(event)
+    actions = await db_call(handle_command, event)
     await execute_actions(actions, context)
 
 

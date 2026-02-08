@@ -69,8 +69,9 @@ DATABASES = {
     'default': parsed_db
 }
 
-# Disable persistent database connections to handle worker fork properly
-DATABASES['default']['CONN_MAX_AGE'] = 0
+# Connection settings for long-running bot process
+DATABASES['default']['CONN_MAX_AGE'] = 600  # Reuse connections for 10 min
+DATABASES['default']['CONN_HEALTH_CHECKS'] = True  # Check stale connections before use
 DATABASES['default']['AUTOCOMMIT'] = True
 
 # Password validation
