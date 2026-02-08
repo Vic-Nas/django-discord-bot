@@ -445,7 +445,8 @@ class TestProcessAction:
 class TestCleanupCommands:
     """Tests for cleanup / cleanall built-in commands."""
 
-    def test_cleanup_returns_cleanup_action(self, test_guild):
+    def test_cleanup_cleans_calling_channel(self, test_guild):
+        """cleanup should clean the channel where the command was called."""
         event = {
             'command': 'cleanup',
             'args': [],
@@ -457,9 +458,26 @@ class TestCleanupCommands:
         cleanup = next((a for a in actions if a['type'] == 'cleanup_channel'), None)
         assert cleanup is not None
         assert cleanup['count'] == 50
-        assert cleanup['channel_id'] == test_guild.bounce_channel_id
+        assert cleanup['channel_id'] == 555555555  # the calling channel
 
-    def test_cleanall_returns_high_count(self, test_guild):
+    def test_cleanup_different_channel_than_bounce(self, test_guild):
+        """cleanup in a non-bounce channel should clean that channel, not bounce."""
+        other_channel_id = 888888888
+        event = {
+            'command': 'cleanup',
+            'args': [],
+            'guild_id': test_guild.guild_id,
+            'channel_id': other_channel_id,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+        }
+        actions = handle_command(event)
+        cleanup = next((a for a in actions if a['type'] == 'cleanup_channel'), None)
+        assert cleanup is not None
+        assert cleanup['channel_id'] == other_channel_id
+        assert cleanup['channel_id'] != test_guild.bounce_channel_id
+
+    def test_cleanall_cleans_calling_channel(self, test_guild):
+        """cleanall should clean the channel where the command was called."""
         event = {
             'command': 'cleanall',
             'args': [],
@@ -471,6 +489,21 @@ class TestCleanupCommands:
         cleanup = next((a for a in actions if a['type'] == 'cleanup_channel'), None)
         assert cleanup is not None
         assert cleanup['count'] == 999
+
+    def test_cleanall_different_channel_than_bounce(self, test_guild):
+        """cleanall in a non-bounce channel should clean that channel."""
+        other_channel_id = 888888888
+        event = {
+            'command': 'cleanall',
+            'args': [],
+            'guild_id': test_guild.guild_id,
+            'channel_id': other_channel_id,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+        }
+        actions = handle_command(event)
+        cleanup = next((a for a in actions if a['type'] == 'cleanup_channel'), None)
+        assert cleanup is not None
+        assert cleanup['channel_id'] == other_channel_id
 
     def test_cleanup_requires_admin(self, test_guild):
         event = {

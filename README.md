@@ -6,24 +6,15 @@ Auto-assign roles via invite links with web admin panel. Two modes: **AUTO** (in
 
 ---
 
-## Architecture
+## Features
 
-```
-Discord ← bot/main.py (single gateway)
-              ↓ events as dicts
-         core/services.py (all business logic)
-              ↓ action dicts
-         bot/main.py (executes on Discord)
-```
-
-Two systems in `services.py`:
-
-1. **Automations** (data-driven) — `Automation` → `Action` models, configured via admin panel.
-   Handles: member join flows, custom commands, form events.
-2. **Built-in commands** (code) — `approve`, `reject`, `addrule`, etc.
-   Complex stateful logic that doesn't fit in JSON config.
-
-The bot never contains business logic — it translates Discord events to dicts, calls `handle_*()`, and executes the returned action dicts.
+- 🎯 **AUTO Mode** — Instant role assignment via invite rules
+- 📝 **APPROVAL Mode** — Forms + admin review (approve/reject via command or reaction)
+- ⚙️ **Automation Engine** — Data-driven triggers + actions, configurable in admin
+- 🌐 **Web Admin** — Manage guilds, automations, forms, templates
+- 🔧 **Customizable Templates** — Per-guild message overrides
+- 🔒 **Secure** — Token-based web panel access
+- 🏢 **Multi-Server** — Per-guild config, roles, channels, rules
 
 ---
 
@@ -48,63 +39,9 @@ The bot never contains business logic — it translates Discord events to dicts,
    APP_URL=https://your-railway-app.up.railway.app
    ```
 
-5. **Invite bot to Discord server**
-   - Go to Developer Portal → OAuth2 → URL Generator
-   - Permissions: `268504112`
-   - Copy URL and invite bot
+5. **Invite bot to Discord server** — bot auto-creates roles, channels, and default automations on join.
 
-6. **Initialize database** (runs once):
-   ```bash
-   python manage.py init_defaults --guild_id YOUR_GUILD_ID
-   ```
-   Or kick/re-invite bot to trigger auto-init on server
-
-7. Configure via web admin panel
-
----
-
-## Local Development
-
-### Setup
-```bash
-git clone https://github.com/Vic-Nas/django-discord-bot
-cd django-discord-bot
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements-dev.txt
-cp .env.example .env
-python manage.py migrate
-python manage.py init_defaults
-```
-
-### Run Tests
-```bash
-# All tests (42 tests: unit + integration)
-pytest tests/ -v
-
-# Unit tests only
-pytest tests/test_handlers.py -v
-
-# Integration tests only
-pytest tests/test_integration.py -v
-```
-
-### Run Bot Locally
-```bash
-python bot/main.py
-```
-
----
-
-## Features
-
-- 🎯 **AUTO Mode** — Instant role assignment via invite rules
-- 📝 **APPROVAL Mode** — Forms + admin review (approve/reject via command or reaction)
-- ⚙️ **Automation Engine** — Data-driven triggers + actions, configurable in admin
-- 🌐 **Web Admin** — Manage guilds, automations, forms, templates
-- 🔧 **Customizable Templates** — Per-guild message overrides
-- 🔒 **Secure** — Token-based web panel access
-- 🏢 **Multi-Server** — Per-guild config, roles, channels, rules
+6. Configure via web admin panel (`@Bot getaccess` in DMs for a login link).
 
 ---
 
@@ -112,64 +49,29 @@ python bot/main.py
 
 ### Setup & Maintenance
 ```
-@Bot reload
-  Sync roles/channels with Discord, ensure resources exist, create missing applications
+@Bot reload          — Sync roles/channels, ensure resources exist
+@Bot setmode AUTO|APPROVAL — Switch server mode
 ```
 
-### Server Configuration
+### Invite Rules
 ```
-@Bot setmode AUTO|APPROVAL
-  AUTO: Instant role assignment based on invite code
-  APPROVAL: Require manual admin approval via form submissions
-
 @Bot addrule <code> <role1,role2,...> [description]
-  Map an invite code to Discord roles (assigned on join in AUTO mode)
-
 @Bot delrule <code>
-  Remove an invite rule
-
 @Bot listrules
-  Show all configured invite rules for this server
-
-@Bot listfields
-  List all custom form fields (configured in admin panel)
 ```
 
 ### Application Management (APPROVAL mode)
 ```
 @Bot approve @user [@role ...]
-  Approve user's application, assign roles from rules + form, remove Pending role
-
-@Bot approve @Role
-  Bulk approve all members with that role who have submitted their form
-
+@Bot approve @Role              — Bulk approve members with that role
 @Bot reject @user [reason]
-  Reject user's application, remove Pending role, notify user via DM
 ```
 
 ### General
 ```
-@Bot help
-  Show available commands (including custom automation commands)
-
-@Bot getaccess
-  Generate a 24-hour web panel access token (DM only)
+@Bot help       — Show all commands (built-in + custom automations)
+@Bot getaccess  — Get web panel link (DM only)
+@Bot cleanup    — Delete resolved bot messages in current channel (Admin)
+@Bot cleanall   — Delete ALL bot messages except pending apps in current channel (Admin)
+@Bot listfields — List form fields
 ```
-
----
-
-## Models
-
-| Model | Purpose |
-|---|---|
-| `GuildSettings` | Per-guild config (mode, channels, admin role) |
-| `Automation` | Trigger → Actions pipeline (MEMBER_JOIN, COMMAND, etc.) |
-| `Action` | Single step in an automation (SEND_EMBED, ADD_ROLE, etc.) |
-| `InviteRule` | Invite code → role mapping |
-| `Application` | Pending/rejected user applications |
-| `FormField` | Custom form fields per guild |
-| `Dropdown` | Dropdown options (roles, channels, custom) |
-| `MessageTemplate` | Default message templates |
-| `GuildMessageTemplate` | Per-guild template overrides |
-| `DiscordRole` / `DiscordChannel` | Cached Discord entities |
-| `AccessToken` | Web panel auth tokens |

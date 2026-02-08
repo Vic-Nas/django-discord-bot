@@ -1,7 +1,20 @@
 import discord
+import json
+import os
 from core.models import GuildSettings, DiscordRole, DiscordChannel, Automation, Action
 from .templates import get_template_async
 from asgiref.sync import sync_to_async
+
+
+# Load default automation definitions from fixture (data, not code)
+_FIXTURE_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    'core', 'fixtures', 'default_automations.json',
+)
+
+def _load_automation_fixture():
+    with open(_FIXTURE_PATH, 'r') as f:
+        return json.load(f)
 
 
 async def setup_guild(bot, guild):
@@ -118,36 +131,12 @@ async def setup_guild(bot, guild):
 
 
 async def _create_default_automations(gs):
-    """Create default event-driven automations for this guild."""
-
-    defaults = [
-        # AUTO mode: log join to bounce channel
-        {
-            'name': 'Log Join (Auto)',
-            'trigger': 'MEMBER_JOIN',
-            'trigger_config': {'mode': 'AUTO'},
-            'description': 'Log new member join to bounce channel in AUTO mode',
-            'actions': [
-                {'order': 1, 'action_type': 'SEND_EMBED', 'config': {
-                    'channel': 'bounce', 'template': 'JOIN_LOG_AUTO', 'color': 0x2ecc71}},
-                {'order': 2, 'action_type': 'ADD_ROLE', 'config': {'from_rule': True}},
-            ]
-        },
-        # APPROVAL mode: create application embed, assign Pending, set topic
-        {
-            'name': 'Approval Join',
-            'trigger': 'MEMBER_JOIN',
-            'trigger_config': {'mode': 'APPROVAL'},
-            'description': 'Create pending application for new member',
-            'actions': [
-                {'order': 1, 'action_type': 'ADD_ROLE', 'config': {'role': 'pending'}},
-                {'order': 2, 'action_type': 'SEND_EMBED', 'config': {
-                    'channel': 'bounce', 'template': 'application', 'track': True}},
-                {'order': 3, 'action_type': 'SEND_DM', 'config': {
-                    'template': 'WELCOME_DM_APPROVAL'}},
-            ]
-        },
-    ]
+    """Create default event-driven automations for this guild.
+    
+    Definitions loaded from core/fixtures/default_automations.json —
+    the same data an admin could create manually via the admin panel.
+    """
+    defaults = _load_automation_fixture()
 
     for d in defaults:
         auto, created = await sync_to_async(Automation.objects.get_or_create)(

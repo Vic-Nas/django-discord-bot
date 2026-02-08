@@ -628,8 +628,8 @@ def _cmd_help(gs, event):
         ('setmode', 'Set AUTO / APPROVAL mode (Admin)'),
         ('approve', 'Approve a pending user (Admin)'),
         ('reject', 'Reject a pending user (Admin)'),
-        ('cleanup', 'Delete resolved bot messages in #bounce (Admin)'),
-        ('cleanall', 'Delete ALL bot messages except pending apps (Admin)'),
+        ('cleanup', 'Delete resolved bot messages in this channel (Admin)'),
+        ('cleanall', 'Delete ALL bot messages except pending apps in this channel (Admin)'),
         ('listfields', 'List form fields'),
         ('reload', 'Reload configuration (Admin)'),
         ('getaccess', 'Get web panel link (DM only)'),
@@ -893,26 +893,28 @@ def _cmd_getaccess(event):
 
 
 def _cmd_cleanup(gs, event):
-    """Delete resolved (non-pending) bot messages in bounce."""
+    """Delete resolved (non-pending) bot messages in the calling channel."""
     _require_admin(gs, event['author']['role_ids'])
-    if not gs.bounce_channel_id:
-        raise _CmdError("No bounce channel configured.")
+    channel_id = event.get('channel_id')
+    if not channel_id:
+        raise _CmdError("Could not determine the current channel.")
     return [
-        {'type': 'cleanup_channel', 'channel_id': gs.bounce_channel_id,
+        {'type': 'cleanup_channel', 'channel_id': channel_id,
          'count': 50, 'guild_id': gs.guild_id},
-        {'type': 'reply', 'content': '\U0001f9f9 Cleaning resolved messages in #bounce (up to 50)...'},
+        {'type': 'reply', 'content': '\U0001f9f9 Cleaning resolved messages in this channel (up to 50)...'},
     ]
 
 
 def _cmd_cleanall(gs, event):
-    """Delete ALL bot messages except pending application embeds."""
+    """Delete ALL bot messages except pending application embeds in the calling channel."""
     _require_admin(gs, event['author']['role_ids'])
-    if not gs.bounce_channel_id:
-        raise _CmdError("No bounce channel configured.")
+    channel_id = event.get('channel_id')
+    if not channel_id:
+        raise _CmdError("Could not determine the current channel.")
     return [
-        {'type': 'cleanup_channel', 'channel_id': gs.bounce_channel_id,
+        {'type': 'cleanup_channel', 'channel_id': channel_id,
          'count': 999, 'guild_id': gs.guild_id},
-        {'type': 'reply', 'content': '\U0001f9f9 Cleaning ALL bot messages in #bounce (keeping pending apps)...'},
+        {'type': 'reply', 'content': '\U0001f9f9 Cleaning ALL bot messages in this channel (keeping pending apps)...'},
     ]
 
 
