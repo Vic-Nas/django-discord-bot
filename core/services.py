@@ -637,7 +637,7 @@ def _cmd_help(gs, event):
         ('delrule', 'Delete an invite rule (Admin)'),
         ('listrules', 'List all invite rules'),
         ('setmode', 'Set AUTO / APPROVAL mode (Admin)'),
-        ('approve', 'Approve a pending user, optionally with extra @roles/#channels (Admin)'),
+        ('approve', 'Approve a user or bulk approve a role; use `noform` to skip form check (Admin)'),
         ('reject', 'Reject a pending user (Admin)'),
         ('cleanup', 'Delete resolved bot messages in this channel (Admin)'),
         ('cleanall', 'Delete ALL bot messages except pending apps in this channel (Admin)'),
@@ -794,15 +794,16 @@ def _cmd_approve(gs, event):
     _require_admin(gs, event['author']['role_ids'])
     args = event['args']
     if len(args) < 1:
-        raise _CmdError("Usage: `@Bot approve @user [@role ...] [#channel ...]` or `@Bot approve @Role`")
+        raise _CmdError("Usage: `@Bot approve @user [@role ...] [#channel ...]` or `@Bot approve [noform] @Role`")
 
     user_mentions = event.get('user_mentions', [])
     role_mentions = event.get('role_mentions', [])
     channel_mentions = event.get('channel_mentions', [])
+    noform = 'noform' in [a.lower() for a in args]
 
     # Bulk approve: role mentioned with no users
     if not user_mentions and role_mentions:
-        return _cmd_bulk_approve(gs, event, role_mentions[0])
+        return _cmd_bulk_approve(gs, event, role_mentions[0], skip_form_check=noform)
 
     if not user_mentions:
         raise _CmdError("Please mention the user to approve: `@Bot approve @user`")
@@ -841,14 +842,17 @@ def _cmd_approve(gs, event):
     return result
 
 
-def _cmd_bulk_approve(gs, event, target_role):
-    """Approve all members with the given role."""
+def _cmd_bulk_approve(gs, event, target_role, skip_form_check=False):
+    """Approve members with the given role.
+
+    By default only approves members who filled the form.
+    With skip_form_check=True (noform flag), approves everyone.
+    """
     actions = []
     members = event.get('members_with_role', [])
-    approved = 0
+    summary = {'approved': 0, 'skipped': 0}
 
     for m in members:
-        # get_or_create: works even without a prior Application
         app, _created = Application.objects.get_or_create(
             guild=gs, user_id=m['id'], status='PENDING',
             defaults={
@@ -858,11 +862,14 @@ def _cmd_bulk_approve(gs, event, target_role):
                 'responses': {},
             },
         )
+        if not skip_form_check and not app.responses:
+            summary['skipped'] += 1
+            continue
         actions.extend(_approve_user(gs, app, event['author'], event))
-        approved += 1
+        summary['approved'] += 1
 
     report = get_template(gs, 'BULK_APPROVE_RESULT').format(
-        approved=approved, skipped=0)
+        approved=summary['approved'], skipped=summary['skipped'])
     actions.append({'type': 'reply', 'content': report})
     return actions
 

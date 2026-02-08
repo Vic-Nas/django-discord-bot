@@ -140,7 +140,8 @@ I need this to manage BotAdmin role assignments and channel permissions.""",
 
     'NO_PENDING_APP': """No pending application for {name}""",
 
-    'BULK_APPROVE_RESULT': """✅ **Bulk approve complete — {approved} approved**""",
+    'BULK_APPROVE_RESULT': """✅ **Bulk approve complete — {approved} approved, {skipped} skipped (form not filled)**
+💡 Use `noform` to approve without form: `@Bot approve noform @Role`""",
 
     # ── List commands ────────────────────────────────────────────────────
 
