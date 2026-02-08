@@ -56,8 +56,41 @@ async def db_call(func, *args, **kwargs):
 
 # ── Action executor ──────────────────────────────────────────────────────────
 
+async def _get_guild_language(actions, context):
+    """Determine the guild's auto-translate language from action context."""
+    guild_id = None
+    for a in actions:
+        if a.get('guild_id'):
+            guild_id = a['guild_id']
+            break
+        ch_id = a.get('channel_id')
+        if ch_id:
+            ch = bot.get_channel(ch_id)
+            if ch and hasattr(ch, 'guild'):
+                guild_id = ch.guild.id
+                break
+    if not guild_id and context and 'channel' in context:
+        ch = context['channel']
+        if hasattr(ch, 'guild') and ch.guild:
+            guild_id = ch.guild.id
+    if not guild_id:
+        return None
+    try:
+        from core.models import GuildSettings
+        gs = await db_call(GuildSettings.objects.get, guild_id=guild_id)
+        return gs.language
+    except Exception:
+        return None
+
+
 async def execute_actions(actions, context=None):
     """Execute a list of action dicts returned by Django services."""
+    # Auto-translate if guild has a language set
+    lang = await _get_guild_language(actions, context)
+    if lang and lang != 'en':
+        from bot.handlers.translate import translate_actions
+        actions = await translate_actions(actions, lang)
+
     for action in actions:
         try:
             await _execute_one(action, context)
@@ -386,7 +419,13 @@ async def on_raw_reaction_add(payload):
 
     applicant = guild.get_member(app.user_id)
     if not applicant:
-        await channel.send("❌ User has left the server.")
+        from bot.handlers.templates import get_template_async
+        try:
+            gs_for_tpl = await db_call(GuildSettings.objects.get, guild_id=guild.id)
+            msg_text = await get_template_async(gs_for_tpl, 'USER_LEFT_SERVER')
+        except Exception:
+            msg_text = "❌ User has left the server."
+        await channel.send(msg_text)
         return
 
     # Convert embed to dict for service

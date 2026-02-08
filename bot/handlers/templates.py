@@ -101,7 +101,7 @@ Expires: {expires}""",
 
 {commands}
 
-💡 Use {bot_mention} <command> to run commands""",
+💡 Mention the bot + command name to run commands""",
 
     'COMMAND_SUCCESS': """✅ **Success!**
 
@@ -131,6 +131,43 @@ I couldn't assign the BotAdmin role to myself. My role is: **{bot_role}**
 3. **Re-add the bot**: Kick me from the server and add me back (this might trigger a fresh setup)
 
 I need this to manage BotAdmin role assignments and channel permissions.""",
+
+    # ── Approve / Reject embed status fields ─────────────────────────────
+
+    'APPROVE_STATUS': """✅ Approved by {admin}""",
+
+    'REJECT_STATUS': """❌ Rejected by {admin}""",
+
+    'NO_PENDING_APP': """No pending application for {name}""",
+
+    'BULK_APPROVE_RESULT': """✅ **Bulk approve complete — {approved} approved**
+⏭️ Skipped (form not filled): {skipped}""",
+
+    # ── List commands ────────────────────────────────────────────────────
+
+    'LISTRULES_EMPTY': """📋 No rules configured yet.""",
+
+    'LISTFIELDS_EMPTY': """📋 No form fields configured yet. Add them in the admin panel.""",
+
+    # ── Cleanup ──────────────────────────────────────────────────────────
+
+    'CLEANUP_REPLY': """🧹 Cleaning resolved messages in this channel (up to {count})...""",
+
+    'CLEANALL_REPLY': """🧹 Cleaning ALL bot messages in this channel (keeping pending apps)...""",
+
+    # ── Permissions & Warnings ───────────────────────────────────────────
+
+    'ADMIN_REQUIRED': """You need the **BotAdmin** role to use this command.""",
+
+    'SERVER_NOT_CONFIGURED': """❌ This server is not configured.""",
+
+    'USER_LEFT_SERVER': """❌ User has left the server.""",
+
+    # ── Auto-Translate ───────────────────────────────────────────────────
+
+    'AUTO_TRANSLATE_ON': """🌐 Auto-translate enabled: **{language}**""",
+
+    'AUTO_TRANSLATE_OFF': """🌐 Auto-translate disabled.""",
 }
 
 

@@ -477,7 +477,8 @@ def _approve_user(gs, application, admin, event, extra_role_ids=None):
         if 'fields' not in original:
             original['fields'] = []
         original['fields'] = [f for f in original['fields'] if f.get('name') != 'Actions']
-        original['fields'].append({'name': 'Status', 'value': f'\u2705 Approved by {admin["name"]}', 'inline': False})
+        status_tpl = get_template(gs, 'APPROVE_STATUS')
+        original['fields'].append({'name': 'Status', 'value': status_tpl.format(admin=admin['name']), 'inline': False})
         original['fields'].append({'name': 'Roles', 'value': roles_str, 'inline': False})
         actions.append({'type': 'edit_message', 'channel_id': gs.bounce_channel_id,
                        'message_id': msg_id, 'embed': original})
@@ -522,7 +523,8 @@ def _reject_user(gs, application, admin, event, reason='No reason provided'):
         if 'fields' not in original:
             original['fields'] = []
         original['fields'] = [f for f in original['fields'] if f.get('name') != 'Actions']
-        original['fields'].append({'name': 'Status', 'value': f'\u274c Rejected by {admin["name"]}', 'inline': False})
+        status_tpl = get_template(gs, 'REJECT_STATUS')
+        original['fields'].append({'name': 'Status', 'value': status_tpl.format(admin=admin['name']), 'inline': False})
         if reason and reason != 'No reason provided':
             original['fields'].append({'name': 'Reason', 'value': reason, 'inline': False})
         actions.append({'type': 'edit_message', 'channel_id': gs.bounce_channel_id,
@@ -551,7 +553,7 @@ class _CmdError(Exception):
 
 def _require_admin(gs, author_role_ids):
     if gs.bot_admin_role_id not in author_role_ids:
-        raise _CmdError("You need the **BotAdmin** role to use this command.")
+        raise _CmdError(get_template(gs, 'ADMIN_REQUIRED'))
 
 
 BUILTIN_COMMANDS = {}  # populated after function definitions
@@ -576,7 +578,7 @@ def handle_command(event):
 
     gs = _get_guild(guild_id)
     if not gs:
-        return [{'type': 'reply', 'content': '\u274c This server is not configured.'}]
+        return [{'type': 'reply', 'content': get_template(None, 'SERVER_NOT_CONFIGURED')}]
 
     # Built-in commands
     handler = BUILTIN_COMMANDS.get(command_name)
@@ -631,6 +633,7 @@ def _cmd_help(gs, event):
         ('cleanup', 'Delete resolved bot messages in this channel (Admin)'),
         ('cleanall', 'Delete ALL bot messages except pending apps in this channel (Admin)'),
         ('listfields', 'List form fields'),
+        ('auto-translate', 'Set auto-translate language (Admin)'),
         ('reload', 'Reload configuration (Admin)'),
         ('getaccess', 'Get web panel link (DM only)'),
     ]
@@ -641,7 +644,8 @@ def _cmd_help(gs, event):
         cmd_name = (a.trigger_config or {}).get('name', '?')
         lines.append(f'\u2022 **{cmd_name}** \u2014 {a.description or "Custom command"}')
 
-    return [{'type': 'reply', 'content': '\U0001f916 **Available Commands:**\n' + '\n'.join(lines)}]
+    tpl = get_template(gs, 'HELP_MESSAGE')
+    return [{'type': 'reply', 'content': tpl.format(commands='\n'.join(lines))}]
 
 
 def _cmd_addrule(gs, event):
@@ -691,7 +695,7 @@ def _cmd_delrule(gs, event):
 def _cmd_listrules(gs, event):
     rules = InviteRule.objects.filter(guild=gs).prefetch_related('roles')
     if not rules.exists():
-        return [{'type': 'reply', 'content': '\U0001f4cb No rules configured yet.'}]
+        return [{'type': 'reply', 'content': get_template(gs, 'LISTRULES_EMPTY')}]
     embed = {'title': '\U0001f4cb Invite Rules', 'color': 0x3498db, 'fields': []}
     for rule in rules:
         role_names = ', '.join(r.name for r in rule.roles.all())
@@ -725,7 +729,7 @@ def _cmd_setmode(gs, event):
 def _cmd_listfields(gs, event):
     fields = FormField.objects.select_related('dropdown').filter(guild=gs).order_by('order')
     if not fields.exists():
-        return [{'type': 'reply', 'content': '\U0001f4cb No form fields configured yet. Add them in the admin panel.'}]
+        return [{'type': 'reply', 'content': get_template(gs, 'LISTFIELDS_EMPTY')}]
     embed = {'title': '\U0001f4cb Application Form Fields', 'color': 0x3498db, 'fields': []}
     for f in fields:
         req = "\u2705 Required" if f.required else "\u2b55 Optional"
@@ -797,7 +801,7 @@ def _cmd_approve(gs, event):
         guild=gs, user_id=target['id'], status='PENDING'
     ).order_by('-created_at').first()
     if not application:
-        raise _CmdError(f"No pending application for {target['name']}")
+        raise _CmdError(get_template(gs, 'NO_PENDING_APP').format(name=target['name']))
 
     extra_role_ids = [r['id'] for r in role_mentions if r['id'] != gs.bot_admin_role_id]
 
@@ -823,9 +827,8 @@ def _cmd_bulk_approve(gs, event, target_role):
         actions.extend(_approve_user(gs, app, event['author'], event))
         summary['approved'] += 1
 
-    report = f"\u2705 **Bulk approve complete \u2014 {summary['approved']} approved**"
-    if summary['skipped']:
-        report += f"\n\u23ed\ufe0f Skipped (form not filled): {summary['skipped']}"
+    report = get_template(gs, 'BULK_APPROVE_RESULT').format(
+        approved=summary['approved'], skipped=summary['skipped'])
     actions.append({'type': 'reply', 'content': report})
     return actions
 
@@ -847,7 +850,7 @@ def _cmd_reject(gs, event):
         guild=gs, user_id=target['id'], status='PENDING'
     ).order_by('-created_at').first()
     if not application:
-        raise _CmdError(f"No pending application for {target['name']}")
+        raise _CmdError(get_template(gs, 'NO_PENDING_APP').format(name=target['name']))
 
     result = _reject_user(gs, application, event['author'], event, reason=reason)
     tpl = get_template(gs, 'REJECT_CONFIRM')
@@ -901,7 +904,7 @@ def _cmd_cleanup(gs, event):
     return [
         {'type': 'cleanup_channel', 'channel_id': channel_id,
          'count': 50, 'guild_id': gs.guild_id},
-        {'type': 'reply', 'content': '\U0001f9f9 Cleaning resolved messages in this channel (up to 50)...'},
+        {'type': 'reply', 'content': get_template(gs, 'CLEANUP_REPLY').format(count=50)},
     ]
 
 
@@ -914,8 +917,40 @@ def _cmd_cleanall(gs, event):
     return [
         {'type': 'cleanup_channel', 'channel_id': channel_id,
          'count': 999, 'guild_id': gs.guild_id},
-        {'type': 'reply', 'content': '\U0001f9f9 Cleaning ALL bot messages in this channel (keeping pending apps)...'},
+        {'type': 'reply', 'content': get_template(gs, 'CLEANALL_REPLY')},
     ]
+
+
+def _cmd_auto_translate(gs, event):
+    """Enable or disable auto-translate for this guild."""
+    _require_admin(gs, event['author']['role_ids'])
+    args = event['args']
+    if len(args) < 1:
+        raise _CmdError("Usage: `@Bot auto-translate on <language_code>` or `@Bot auto-translate off`")
+
+    action = args[0].lower()
+    if action == 'off':
+        gs.language = None
+        gs.save()
+        tpl = get_template(gs, 'AUTO_TRANSLATE_OFF')
+        return [{'type': 'reply', 'content': tpl}]
+    elif action == 'on':
+        if len(args) < 2:
+            raise _CmdError("Usage: `@Bot auto-translate on <language_code>` (e.g. `fr`, `es`, `de`)")
+        lang_input = args[1]
+        try:
+            from bot.handlers.translate import validate_language
+            code = validate_language(lang_input)
+        except Exception:
+            code = lang_input.lower()[:10]  # fallback: accept as-is
+        if not code:
+            raise _CmdError(f"Unsupported language: `{lang_input}`. Use a language code like `fr`, `es`, `de`, `ja`.")
+        gs.language = code
+        gs.save()
+        tpl = get_template(gs, 'AUTO_TRANSLATE_ON')
+        return [{'type': 'reply', 'content': tpl.format(language=code)}]
+    else:
+        raise _CmdError("Usage: `@Bot auto-translate on <language_code>` or `@Bot auto-translate off`")
 
 
 # Register built-in commands
@@ -931,4 +966,5 @@ BUILTIN_COMMANDS.update({
     'reject': _cmd_reject,
     'cleanup': _cmd_cleanup,
     'cleanall': _cmd_cleanall,
+    'auto-translate': _cmd_auto_translate,
 })

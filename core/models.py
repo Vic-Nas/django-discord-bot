@@ -21,6 +21,12 @@ class GuildSettings(models.Model):
     bounce_channel_id = models.BigIntegerField(null=True, blank=True)
     pending_channel_id = models.BigIntegerField(null=True, blank=True)
 
+    # Auto-translate: language code (e.g. 'fr', 'es') or null for English/off
+    language = models.CharField(
+        max_length=10, null=True, blank=True,
+        help_text='Auto-translate language code (e.g. fr, es, de). Leave blank for English.',
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -282,31 +288,55 @@ class Application(models.Model):
 class MessageTemplate(models.Model):
     """Editable message templates."""
     TEMPLATE_TYPES = [
-        ('INSTALL_WELCOME', 'Installation Welcome'),
+        # ── Setup & Welcome ──
+        ('INSTALL_WELCOME', 'Setup – Welcome Message'),
+        ('SETUP_DIAGNOSTIC', 'Setup – Role Hierarchy Warning'),
+        # ── Join Logs ──
         ('JOIN_LOG_AUTO', 'Join Log (AUTO mode)'),
         ('JOIN_LOG_APPROVAL', 'Join Log (APPROVAL mode)'),
+        # ── Pending / Application ──
         ('PENDING_CHANNEL_TOPIC', 'Pending Channel – Topic (with form)'),
         ('PENDING_CHANNEL_TOPIC_NO_FORM', 'Pending Channel – Topic (no form)'),
         ('APPLICATION_SENT', 'Application Submitted'),
         ('APPLICATION_APPROVED', 'Application Approved'),
         ('APPLICATION_REJECTED', 'Application Rejected'),
+        # ── Approve / Reject ──
         ('APPROVE_CONFIRM', 'Approve – Admin Confirmation'),
         ('APPROVE_DM', 'Approve – User DM'),
+        ('APPROVE_STATUS', 'Approve – Embed Status Field'),
         ('REJECT_CONFIRM', 'Reject – Admin Confirmation'),
         ('REJECT_DM', 'Reject – User DM'),
+        ('REJECT_STATUS', 'Reject – Embed Status Field'),
         ('REJECT_PENDING', 'Reject – Pending Channel Notice'),
         ('APPROVAL_NOTIFICATION', 'Approval Channel Notification'),
+        ('NO_PENDING_APP', 'No Pending Application'),
+        ('BULK_APPROVE_RESULT', 'Bulk Approve – Result'),
+        # ── GetAccess ──
         ('GETACCESS_RESPONSE', 'GetAccess Token Response'),
         ('GETACCESS_EXISTS', 'Token Already Exists'),
         ('GETACCESS_NO_ADMIN', 'GetAccess – Not Admin'),
         ('GETACCESS_PICK_SERVER', 'GetAccess – Pick Server'),
+        # ── Commands ──
         ('HELP_MESSAGE', 'Help Command'),
         ('COMMAND_SUCCESS', 'Command Success'),
         ('COMMAND_ERROR', 'Command Error'),
         ('COMMAND_NOT_FOUND', 'Command Not Found'),
+        ('COMMAND_DISABLED', 'Command Disabled'),
+        # ── List Commands ──
+        ('LISTRULES_EMPTY', 'List Rules – Empty'),
+        ('LISTFIELDS_EMPTY', 'List Fields – Empty'),
+        # ── Cleanup ──
+        ('CLEANUP_REPLY', 'Cleanup – Confirmation'),
+        ('CLEANALL_REPLY', 'Clean All – Confirmation'),
+        # ── Permissions & Warnings ──
+        ('ADMIN_REQUIRED', 'Admin Required Warning'),
+        ('SERVER_NOT_CONFIGURED', 'Server Not Configured'),
         ('DM_ONLY_WARNING', 'DM-Only Warning'),
         ('SERVER_ONLY_WARNING', 'Server-Only Warning'),
-        ('SETUP_DIAGNOSTIC', 'Setup – Role Hierarchy Warning'),
+        ('USER_LEFT_SERVER', 'User Left Server'),
+        # ── Auto-Translate ──
+        ('AUTO_TRANSLATE_ON', 'Auto-Translate Enabled'),
+        ('AUTO_TRANSLATE_OFF', 'Auto-Translate Disabled'),
     ]
 
     template_type = models.CharField(max_length=50, choices=TEMPLATE_TYPES, unique=True)

@@ -84,7 +84,7 @@ class TestHandleCommand:
     def test_all_builtins_registered(self):
         expected = {'help', 'addrule', 'delrule', 'listrules', 'setmode',
                     'listfields', 'reload', 'approve', 'reject',
-                    'cleanup', 'cleanall'}
+                    'cleanup', 'cleanall', 'auto-translate'}
         assert expected == set(BUILTIN_COMMANDS.keys())
 
     def test_help_returns_reply(self, test_guild):
@@ -97,7 +97,7 @@ class TestHandleCommand:
         }
         actions = handle_command(event)
         assert any(a['type'] == 'reply' for a in actions)
-        assert 'Available Commands' in actions[0]['content']
+        assert 'Bot Commands' in actions[0]['content']
 
     def test_setmode_changes_mode(self, test_guild):
         event = {
@@ -526,3 +526,69 @@ class TestCleanupCommands:
         }
         actions = handle_command(event)
         assert any('BotAdmin' in a.get('content', '') for a in actions)
+
+
+class TestAutoTranslateCommand:
+    """Tests for the auto-translate built-in command."""
+
+    def test_auto_translate_on(self, test_guild):
+        event = {
+            'command': 'auto-translate',
+            'args': ['on', 'fr'],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+        }
+        actions = handle_command(event)
+        test_guild.refresh_from_db()
+        assert test_guild.language == 'fr'
+        assert any('fr' in a.get('content', '') for a in actions)
+
+    def test_auto_translate_off(self, test_guild):
+        test_guild.language = 'fr'
+        test_guild.save()
+
+        event = {
+            'command': 'auto-translate',
+            'args': ['off'],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+        }
+        actions = handle_command(event)
+        test_guild.refresh_from_db()
+        assert test_guild.language is None
+        assert any('disabled' in a.get('content', '').lower() for a in actions)
+
+    def test_auto_translate_requires_admin(self, test_guild):
+        event = {
+            'command': 'auto-translate',
+            'args': ['on', 'fr'],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 99, 'name': 'Pleb', 'role_ids': [999]},
+        }
+        actions = handle_command(event)
+        assert any('BotAdmin' in a.get('content', '') for a in actions)
+
+    def test_auto_translate_missing_args(self, test_guild):
+        event = {
+            'command': 'auto-translate',
+            'args': [],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+        }
+        actions = handle_command(event)
+        assert any('Usage' in a.get('content', '') for a in actions)
+
+    def test_auto_translate_on_missing_lang(self, test_guild):
+        event = {
+            'command': 'auto-translate',
+            'args': ['on'],
+            'guild_id': test_guild.guild_id,
+            'channel_id': 555555555,
+            'author': {'id': 1, 'name': 'Admin', 'role_ids': [111111111]},
+        }
+        actions = handle_command(event)
+        assert any('Usage' in a.get('content', '') for a in actions)

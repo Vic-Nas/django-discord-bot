@@ -16,11 +16,11 @@ admin.site.index_title = "Dashboard"
 
 @admin.register(GuildSettings)
 class GuildSettingsAdmin(admin.ModelAdmin):
-    list_display = ('guild_name', 'guild_id', 'mode', 'updated_at')
-    list_filter = ('mode',)
+    list_display = ('guild_name', 'guild_id', 'mode', 'language', 'updated_at')
+    list_filter = ('mode', 'language')
     readonly_fields = ('guild_id', 'created_at', 'updated_at')
     fieldsets = (
-        (None, {'fields': ('guild_id', 'guild_name', 'mode')}),
+        (None, {'fields': ('guild_id', 'guild_name', 'mode', 'language')}),
         ('Roles (auto-managed)', {
             'fields': ('bot_admin_role_id', 'pending_role_id'),
             'description': 'These are auto-created by the bot. Only edit if you know the Discord role IDs.',
@@ -196,7 +196,31 @@ class ApplicationAdmin(admin.ModelAdmin):
 
 @admin.register(MessageTemplate)
 class MessageTemplateAdmin(admin.ModelAdmin):
-    list_display = ('template_type', 'default_content_preview')
+    list_display = ('template_type', 'get_category', 'default_content_preview')
+    list_filter = ('template_type',)
+    search_fields = ('template_type', 'default_content')
+
+    def get_category(self, obj):
+        """Group templates by their prefix for easier browsing."""
+        t = obj.template_type
+        if t.startswith(('INSTALL', 'SETUP')):
+            return 'Setup'
+        if t.startswith('JOIN'):
+            return 'Join'
+        if t.startswith(('PENDING', 'APPLICATION')):
+            return 'Application'
+        if t.startswith(('APPROVE', 'REJECT', 'BULK', 'NO_PENDING')):
+            return 'Approval'
+        if t.startswith('GETACCESS'):
+            return 'Access'
+        if t.startswith(('COMMAND', 'HELP')):
+            return 'Commands'
+        if t.startswith(('CLEANUP', 'CLEANALL', 'CLEAN')):
+            return 'Cleanup'
+        if t.startswith('AUTO_TRANSLATE'):
+            return 'Translate'
+        return 'Other'
+    get_category.short_description = 'Category'
 
     def default_content_preview(self, obj):
         return obj.default_content[:80] + '...' if len(obj.default_content) > 80 else obj.default_content
